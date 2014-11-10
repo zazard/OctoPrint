@@ -13,6 +13,7 @@ class RepetierTextualProtocol(RepRapProtocol):
 	__protocolinfo__ = ("repetier", "RepRap (Repetier Flavor)", False)
 
 	MESSAGE_TARGET_TEMPERATURE = staticmethod(lambda line: "TargetExtr" in line or "TargetBed" in line)
+	MESSAGE_TEMPERATURE = staticmethod(lambda line: RepRapProtocol.MESSAGE_TEMPERATURE(line) or RepetierTextualProtocol.MESSAGE_TARGET_TEMPERATURE(line))
 
 	REGEX_POSITIVE_FLOAT = "[+]?[0-9]*\.?[0-9]+"
 	REGEX_TARGET_EXTRUDER_TEMPERATURE = re.compile("TargetExtr([0-9]+):(%s)" % REGEX_POSITIVE_FLOAT)
@@ -26,10 +27,10 @@ class RepetierTextualProtocol(RepRapProtocol):
 		RepRapProtocol._reset(self, from_start=from_start)
 		self._sd_available = True
 
-	def _evaluate_firmware_specific_messages(self, source, message):
-		if RepetierTextualProtocol.MESSAGE_TARGET_TEMPERATURE(message):
-			match_extr = RepetierTextualProtocol.REGEX_TARGET_EXTRUDER_TEMPERATURE.match(message)
-			match_bed = RepetierTextualProtocol.REGEX_TARGET_BED_TEMPERATURE.match(message)
+	def _process_temperatures(self, line):
+		if RepetierTextualProtocol.MESSAGE_TARGET_TEMPERATURE(line):
+			match_extr = RepetierTextualProtocol.REGEX_TARGET_EXTRUDER_TEMPERATURE.match(line)
+			match_bed = RepetierTextualProtocol.REGEX_TARGET_BED_TEMPERATURE.match(line)
 
 			current_temperatures = self.get_current_temperatures()
 			key = None
@@ -54,5 +55,5 @@ class RepetierTextualProtocol(RepRapProtocol):
 			else:
 				current_temperatures[key] = (None, target)
 			self._updateTemperature(current_temperatures)
-
-		return True
+		else:
+			RepRapProtocol._process_temperatures(self, line)
