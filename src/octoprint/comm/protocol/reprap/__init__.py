@@ -19,6 +19,7 @@ from octoprint.filemanager import valid_file_type
 from octoprint.filemanager.destinations import FileDestinations
 from octoprint.settings import settings
 from octoprint.util import CountedEvent
+import octoprint.plugin
 
 
 class RepRapProtocol(Protocol):
@@ -163,6 +164,13 @@ class RepRapProtocol(Protocol):
 		self._current_line = 1
 		self._current_extruder = 0
 		self._state = State.OFFLINE
+
+		self._pluginManager = octoprint.plugin.plugin_manager()
+		self._gcode_hooks = dict(
+			queued=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.queued").values(),
+			sent=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.sent").values(),
+			acknowledged=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.acknowledged").values()
+		)
 
 		self._preprocessors = dict()
 		self._setup_preprocessors()
@@ -871,6 +879,10 @@ class RepRapProtocol(Protocol):
 
 		if not phase in ("queued", "sent", "acknowledged"):
 			return None
+
+		#handle our hooks, if any
+		for hook in self._gcode_hooks[phase]:
+			command, with_line_number = hook(self, command, with_line_number=with_line_number)
 
 		if phase in self._preprocessors and command.command in self._preprocessors[phase]:
 			command, with_line_number = self._preprocessors[phase][command.command](command, with_line_number)
