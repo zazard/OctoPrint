@@ -116,6 +116,12 @@ class RepRapProtocol(Protocol):
 	# to be fetched from the transport layer in order to fully handle the error at hand.
 	REGEX_ERROR_MULTILINE = re.compile("Error:[0-9]\n")
 
+	BLOCKING_COMMANDS = (
+		"M109", "M190",                                             # set and wait for temperature (hotend & bed)
+		"G28",                                                      # home
+		"G29", "G30", "G31", "G32"                                  # bed probing
+	)
+
 	def __init__(self, transport_factory, protocol_listener=None):
 		Protocol.__init__(self, transport_factory, protocol_listener)
 
@@ -887,6 +893,14 @@ class RepRapProtocol(Protocol):
 		if phase in self._preprocessors and command is not None and command.command in self._preprocessors[phase]:
 			command, with_line_number = self._preprocessors[phase][command.command](command, with_line_number)
 
+		# blocking command?
+		if command is not None and command.command in self.__class__.BLOCKING_COMMANDS:
+			if phase == "sent":
+				self._logger.info("Waiting for a blocking command to finish")
+				self._blocking_command_active = True
+			elif phase == "acknowledged":
+				self._blocking_command_active = False
+
 		return command, with_line_number
 
 	def _prepare_for_sending(self, command, with_line_number=None):
@@ -933,27 +947,13 @@ class RepRapProtocol(Protocol):
 		key = "tool%d" % command.t if command.t is not None else self._current_extruder
 		self._handle_temperature_code(command, key)
 		return command, with_line_number
-
-	def _gcode_M109_sent(self, command, with_line_number):
-		self._blocking_command_active = True
-		self._logger.info("Waiting for a blocking command to finish")
-		return self._gcode_M104_sent(command, with_line_number)
+	_gcode_M109_sent = _gcode_M104_sent
 
 	def _gcode_M140_sent(self, command, with_line_number):
 		key = "bed"
 		self._handle_temperature_code(command, key)
 		return command, with_line_number
-
-	def _gcode_M190_sent(self, command, with_line_number):
-		self._blocking_command_active = True
-		self._logger.info("Waiting for a blocking command to finish")
-		return self._gcode_M140_sent(command, with_line_number)
-
-	def _gcode_M109_acknowledged(self, command, with_line_number):
-		self._blocking_command_active = False
-		self._logger.info("Blocking command finished")
-		return command, with_line_number
-	_gcode_M190_acknowledged = _gcode_M109_acknowledged
+	_gcode_M190_sent = _gcode_M140_sent
 
 	def _handle_temperature_code(self, command, key):
 		if command.s is not None:
