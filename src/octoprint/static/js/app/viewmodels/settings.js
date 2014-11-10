@@ -380,5 +380,4 @@ function SettingsViewModel(loginStateViewModel, usersViewModel) {
             }
         });
     };
-
 }

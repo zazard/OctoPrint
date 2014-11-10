@@ -41,6 +41,13 @@
   * The "Slicing done" notification is now colored green ([#558](https://github.com/foosel/OctoPrint/issues/558)).
 * File management now supports STL files as first class citizens (including UI adjustments to allow management of
   uploaded STL files including removal and reslicing) and also allows folders (not yet supported by UI)
+* Also interpret lines starting with "!!" as errors
+* Added deletion of pyc files to the `python setup.py clean` command
+* Settings now show a QRCode for the API Key ([#637](https://github.com/foosel/OctoPrint/pull/637))
+* Username in login dialog is not automatically capitalized on mobile devices anymore ([#639](https://github.com/foosel/OctoPrint/pull/639))
+* "Slicing Done" and "Streaming Done" notifications now have a green background ([#558](https://github.com/foosel/OctoPrint/issues/558))
+* Files that are currently in use, be it for slicing, printing or whatever, are now tracked and can not be deleted as
+  long as they are in use
 
 ### Bug Fixes
 
@@ -48,11 +55,22 @@
   as 0
 * [#633](https://github.com/foosel/OctoPrint/issues/633) - Correctly interpret temperature lines from multi extruder 
   setups under Smoothieware
+* [#556](https://github.com/foosel/OctoPrint/issues/556) - Allow login of the same user from multiple browsers without
+  side effects
 * Various fixes of bugs in newly introduced features and improvements:
   * [#625](https://github.com/foosel/OctoPrint/pull/625) - Newly added GCODE files were not being added to the analysis
     queue
+* Various fixes without tickets:
+  * GCODE viewer now doesn't stumble over completely extrusionless GCODE files
 
-## 1.1.1 (Unreleased)
+## 1.1.2 (Unreleased)
+
+### Bug Fixes
+
+* [#634](https://github.com/foosel/OctoPrint/pull/634) - Fixed missing `branch` fields in version dicts generated
+  by versioneer
+
+## 1.1.1 (2014-10-27)
 
 ### Improvements
 

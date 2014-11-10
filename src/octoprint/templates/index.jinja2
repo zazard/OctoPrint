@@ -100,7 +100,7 @@
                                 </a>
                                 <div id="login_dropdown_loggedout" style="padding: 15px" class="dropdown-menu" data-bind="css: {hide: loginState.loggedIn(), 'dropdown-menu': !loginState.loggedIn()}">
                                     <label for="login_user">{{ _('Username') }}</label>
-                                    <input type="text" id="login_user" placeholder="{{ _('Username') }}">
+                                    <input type="text" id="login_user" placeholder="{{ _('Username') }}" autocapitalize="none">
                                     <label for="login_pass">{{ _('Password') }}</label>
                                     <input type="password" id="login_pass" placeholder="{{ _('Password') }}">
                                     <label class="checkbox">
@@ -665,6 +665,7 @@
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/jquery/jquery.iframe-transport.js') }}"></script>
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/jquery/jquery.fileupload.js') }}"></script>
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/jquery/jquery.slimscroll.min.js') }}"></script>
+        <script type="text/javascript" src="{{ url_for('static', filename='js/lib/jquery/jquery.qrcode.min.js') }}"></script>
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/sockjs-0.3.4.min.js') }}"></script>
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/moment-with-locales.min.js') }}"></script>
         <script type="text/javascript" src="{{ url_for('static', filename='js/lib/pusher.color.min.js') }}"></script>
