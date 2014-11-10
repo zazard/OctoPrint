@@ -884,7 +884,7 @@ class RepRapProtocol(Protocol):
 		for hook in self._gcode_hooks[phase]:
 			command, with_line_number = hook(self, command, with_line_number)
 
-		if phase in self._preprocessors and command.command in self._preprocessors[phase]:
+		if phase in self._preprocessors and command is not None and command.command in self._preprocessors[phase]:
 			command, with_line_number = self._preprocessors[phase][command.command](command, with_line_number)
 
 		return command, with_line_number
