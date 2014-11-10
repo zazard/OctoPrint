@@ -96,18 +96,18 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 			"origin": self._current_file.getFileLocation()
 		})
 
-	def pause_print(self):
+	def pause_print(self, only_pause=None, only_resume=None):
 		payload = {
 			"file": self._current_file.getFilename(),
 			"filename": os.path.basename(self._current_file.getFilename()),
 			"origin": self._current_file.getFileLocation()
 		}
 
-		if self._state == State.PRINTING:
+		if self._state == State.PRINTING and not only_resume:
 			self._changeState(State.PAUSED)
 			eventManager().fire(Events.PRINT_PAUSED, payload)
 
-		elif self._state == State.PAUSED:
+		elif self._state == State.PAUSED and not only_pause:
 			self._changeState(State.PRINTING)
 			eventManager().fire(Events.PRINT_RESUMED, payload)
 
