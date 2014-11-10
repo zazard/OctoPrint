@@ -29,6 +29,8 @@ class RepRapProtocol(Protocol):
 	MESSAGE_OK = staticmethod(lambda line: line.startswith("ok"))
 	MESSAGE_START = staticmethod(lambda line: line.startswith("start"))
 	MESSAGE_WAIT = staticmethod(lambda line: line.startswith("wait"))
+	MESSAGE_RESEND = staticmethod(lambda line: line.lower().startswith("resend") or line.lower().startswith("rs"))
+
 	MESSAGE_TEMPERATURE = staticmethod(lambda line: " T:" in line or line.startswith("T:") or " T0:" in line or line.startswith("T0:"))
 
 	MESSAGE_SD_INIT_OK = staticmethod(lambda line: line.lower() == "sd card ok")
@@ -54,7 +56,6 @@ class RepRapProtocol(Protocol):
 															or 'missing checksum' in line.lower())
 	MESSAGE_ERROR_COMMUNICATION_LINENUMBER = staticmethod(lambda line: 'line number is not line number' in line.lower()
 															or 'expected line' in line.lower())
-	MESSAGE_RESEND = staticmethod(lambda line: line.lower().startswith("resend") or line.lower().startswith("rs"))
 
 	TRANSFORM_ERROR = staticmethod(lambda line: line[6:] if line.startswith("Error:") else line[2:])
 
@@ -137,14 +138,14 @@ class RepRapProtocol(Protocol):
 		self._temperature_interval = 5.0
 		self._sdstatus_interval = 5.0
 
-		self._nack_lines = deque([])
-		self._nack_lock = threading.RLock()
+		self._sent_lines = deque([])
+		self._sent_lock = threading.RLock()
 
 		self._previous_resend = False
 		self._last_comm_error = None
 		self._last_resend_number = None
 		self._current_resend_count = 0
-		self._nacks_before_resend = 0
+		self._sent_before_resend = 0
 
 		self._send_queue_processing = True
 		self._thread = threading.Thread(target=self._handle_send_queue, name="SendQueueHandler")
@@ -183,7 +184,7 @@ class RepRapProtocol(Protocol):
 				self._preprocessors[postfix][code] = getattr(self, attr)
 
 	def _reset(self, from_start=False):
-		with self._nack_lock:
+		with self._sent_lock:
 			self._lastTemperatureUpdate = time.time()
 			self._lastSdProgressUpdate = time.time()
 
@@ -205,7 +206,7 @@ class RepRapProtocol(Protocol):
 			# clear the the send queue
 			self._send_queue.clear()
 
-			self._nack_lines.clear()
+			self._sent_lines.clear()
 			self._current_line = 1
 			self._current_extruder = 0
 
@@ -213,7 +214,7 @@ class RepRapProtocol(Protocol):
 			self._last_comm_error = None
 			self._last_resend_number = None
 			self._current_resend_count = 0
-			self._nacks_before_resend = 0
+			self._sent_before_resend = 0
 
 	def connect(self, protocol_options, transport_options):
 		self._wait_for_start = protocol_options["waitForStart"] if "waitForStart" in protocol_options else False
@@ -229,7 +230,7 @@ class RepRapProtocol(Protocol):
 		Protocol.connect(self, protocol_options, transport_options)
 
 		# we'll send an M110 first to reset line numbers to 0
-		self._send(RepRapProtocol.COMMAND_SET_LINE(0), high_priority=True)
+		self._send(self.__class__.COMMAND_SET_LINE(0), high_priority=True)
 
 		# enqueue our first temperature query so it gets sent right on establishment of the connection
 		self._send_temperature_query(with_type=True)
@@ -243,7 +244,7 @@ class RepRapProtocol(Protocol):
 		if origin == FileDestinations.SDCARD:
 			if not self._sd_available:
 				return
-			self._send(RepRapProtocol.COMMAND_SD_SELECT_FILE(filename), high_priority=True)
+			self._send(self.__class__.COMMAND_SD_SELECT_FILE(filename), high_priority=True)
 		else:
 			self._selectFile(PrintingGcodeFileInformation(filename, self.get_temperature_offsets))
 
@@ -253,14 +254,14 @@ class RepRapProtocol(Protocol):
 		Protocol.start_print(self)
 		if isinstance(self._current_file, PrintingSdFileInformation):
 			if wasPaused:
-				self._send(RepRapProtocol.COMMAND_SD_SET_POS(0))
+				self._send(self.__class__.COMMAND_SD_SET_POS(0))
 				self._current_file.setFilepos(0)
-			self._send(RepRapProtocol.COMMAND_SD_START())
+			self._send(self.__class__.COMMAND_SD_START())
 
 	def cancel_print(self):
 		if isinstance(self._current_file, PrintingSdFileInformation):
-			self._send(RepRapProtocol.COMMAND_SD_PAUSE)
-			self._send(RepRapProtocol.COMMAND_SD_SET_POS(0))
+			self._send(self.__class__.COMMAND_SD_PAUSE)
+			self._send(self.__class__.COMMAND_SD_SET_POS(0))
 
 		Protocol.cancel_print(self)
 
@@ -269,13 +270,13 @@ class RepRapProtocol(Protocol):
 
 	def init_sd(self):
 		Protocol.init_sd(self)
-		self._send(RepRapProtocol.COMMAND_SD_INIT())
+		self._send(self.__class__.COMMAND_SD_INIT())
 		if self._sd_always_available:
 			self._changeSdState(True)
 
 	def release_sd(self):
 		Protocol.release_sd(self)
-		self._send(RepRapProtocol.COMMAND_SD_RELEASE())
+		self._send(self.__class__.COMMAND_SD_RELEASE())
 		if self._sd_always_available:
 			self._changeSdState(False)
 
@@ -284,14 +285,14 @@ class RepRapProtocol(Protocol):
 			return
 
 		Protocol.refresh_sd_files(self)
-		self._send(RepRapProtocol.COMMAND_SD_REFRESH())
+		self._send(self.__class__.COMMAND_SD_REFRESH())
 
 	def add_sd_file(self, path, local, remote):
 		Protocol.add_sd_file(self, path, local, remote)
 		if not self.is_operational() or self.is_busy():
 			return
 
-		self.send_manually(RepRapProtocol.COMMAND_SD_BEGIN_WRITE(remote))
+		self.send_manually(self.__class__.COMMAND_SD_BEGIN_WRITE(remote))
 
 		self._current_file = StreamingGcodeFileInformation(path, local, remote)
 
@@ -309,7 +310,7 @@ class RepRapProtocol(Protocol):
 						 self._current_file.getFilename() == filename):
 			return
 
-		self.send_manually(RepRapProtocol.COMMAND_SD_DELETE(filename))
+		self.send_manually(self.__class__.COMMAND_SD_DELETE(filename))
 		self.refresh_sd_files()
 
 	def set_temperature(self, type, value):
@@ -317,30 +318,30 @@ class RepRapProtocol(Protocol):
 			if settings().getInt(["printerParameters", "numExtruders"]) > 1:
 				try:
 					tool_num = int(type[len("tool"):])
-					self.send_manually(RepRapProtocol.COMMAND_SET_EXTRUDER_TEMP(value, tool_num, False))
+					self.send_manually(self.__class__.COMMAND_SET_EXTRUDER_TEMP(value, tool_num, False))
 				except ValueError:
 					pass
 			else:
 				# set temperature without tool number
-				self.send_manually(RepRapProtocol.COMMAND_SET_EXTRUDER_TEMP(value, None, False))
+				self.send_manually(self.__class__.COMMAND_SET_EXTRUDER_TEMP(value, None, False))
 		elif type == "bed":
-			self.send_manually(RepRapProtocol.COMMAND_SET_BED_TEMP(value, False))
+			self.send_manually(self.__class__.COMMAND_SET_BED_TEMP(value, False))
 
 	def jog(self, axis, amount):
 		speeds = settings().get(["printerParameters", "movementSpeed", ["x", "y", "z"]], asdict=True)
 		commands = (
-			RepRapProtocol.COMMAND_SET_RELATIVE_POSITIONING(),
-			RepRapProtocol.COMMAND_MOVE_AXIS(axis, amount, speeds[axis]),
-			RepRapProtocol.COMMAND_SET_ABSOLUTE_POSITIONING()
+			self.__class__.COMMAND_SET_RELATIVE_POSITIONING(),
+			self.__class__.COMMAND_MOVE_AXIS(axis, amount, speeds[axis]),
+			self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING()
 		)
 		self.send_manually(commands)
 
 	def home(self, axes):
 
 		commands = (
-			RepRapProtocol.COMMAND_SET_RELATIVE_POSITIONING(),
-			RepRapProtocol.COMMAND_HOME_AXIS('x' in axes, 'y' in axes, 'z' in axes),
-			RepRapProtocol.COMMAND_SET_ABSOLUTE_POSITIONING()
+			self.__class__.COMMAND_SET_RELATIVE_POSITIONING(),
+			self.__class__.COMMAND_HOME_AXIS('x' in axes, 'y' in axes, 'z' in axes),
+			self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING()
 		)
 		self.send_manually(commands)
 
@@ -348,16 +349,16 @@ class RepRapProtocol(Protocol):
 		extrusionSpeed = settings().get(["printerParameters", "movementSpeed", "e"])
 
 		commands = (
-			RepRapProtocol.COMMAND_SET_RELATIVE_POSITIONING(),
-			RepRapProtocol.COMMAND_EXTRUDE(amount, extrusionSpeed),
-			RepRapProtocol.COMMAND_SET_ABSOLUTE_POSITIONING()
+			self.__class__.COMMAND_SET_RELATIVE_POSITIONING(),
+			self.__class__.COMMAND_EXTRUDE(amount, extrusionSpeed),
+			self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING()
 		)
 		self.send_manually(commands)
 
 	def change_tool(self, tool):
 		try:
 			tool_num = int(tool[len("tool"):])
-			self.send_manually(RepRapProtocol.COMMAND_SET_TOOL(tool_num))
+			self.send_manually(self.__class__.COMMAND_SET_TOOL(tool_num))
 		except ValueError:
 			pass
 
@@ -372,7 +373,7 @@ class RepRapProtocol(Protocol):
 
 	def _fileTransferFinished(self, current_file):
 		if isinstance(current_file, StreamingGcodeFileInformation):
-			self.send_manually(RepRapProtocol.COMMAND_SD_END_WRITE(current_file.getRemoteFilename()))
+			self.send_manually(self.__class__.COMMAND_SD_END_WRITE(current_file.getRemoteFilename()))
 			eventManager().fire(Events.TRANSFER_DONE, {
 				"local": current_file.getLocalFilename(),
 				"remote": current_file.getRemoteFilename(),
@@ -380,7 +381,7 @@ class RepRapProtocol(Protocol):
 			})
 		else:
 			self._logger.warn("Finished file transfer to printer's SD card, but could not determine remote filename, assuming 'unknown.gco' for end-write-command")
-			self.send_manually(RepRapProtocol.COMMAND_SD_END_WRITE("unknown.gco"))
+			self.send_manually(self.__class__.COMMAND_SD_END_WRITE("unknown.gco"))
 		self.refresh_sd_files()
 
 	##~~ callback methods
@@ -391,19 +392,42 @@ class RepRapProtocol(Protocol):
 
 		message = self._handle_errors(message.strip())
 
-		# resend == roll back time a bit
-		if RepRapProtocol.MESSAGE_RESEND(message):
+		##~~ Control message processing: ok, resend, start, wait
+
+		if self.__class__.MESSAGE_OK(message):
+			if self._state == State.CONNECTED and self._startSeen:
+				# if we are currently connected, have seen start and just gotten an "ok" we are now operational
+				self._changeState(State.OPERATIONAL)
+			if self.is_heating_up():
+				self._heatupDone()
+
+			if not self._previous_resend:
+				# our most left line from the sent_lines just got acknowledged
+				self._process_acknowledgement()
+			else:
+				self._previous_resend = False
+			self._clear_for_send.set()
+
+		elif self.__class__.MESSAGE_START(message):
+			# initial handshake with the firmware
+			if self._state != State.CONNECTED:
+				# we received a "start" while running, this means the printer has unexpectedly reset
+				self._changeState(State.CONNECTED)
+			self._reset(from_start=True)
+			return
+
+		elif self.__class__.MESSAGE_RESEND(message):
 			self._previous_resend = True
 			self._handle_resend_request(message)
 			return
 
-		if RepRapProtocol.MESSAGE_WAIT(message):
+		elif self.__class__.MESSAGE_WAIT(message):
 			#self._clear_for_send.set()
 			# TODO really?
-			pass
+			return
 
 		# SD file list
-		if self._receivingSdFileList and not RepRapProtocol.MESSAGE_SD_END_FILE_LIST(message):
+		if self._receivingSdFileList and not self.__class__.MESSAGE_SD_END_FILE_LIST(message):
 			fileinfo = message.strip().split(None, 2)
 			if len(fileinfo) > 1:
 				filename, size = fileinfo
@@ -427,80 +451,57 @@ class RepRapProtocol(Protocol):
 		##~~ regular message processing
 
 		# temperature updates
-		if RepRapProtocol.MESSAGE_TEMPERATURE(message):
+		if self.__class__.MESSAGE_TEMPERATURE(message):
 			self._process_temperatures(message)
-			if not RepRapProtocol.MESSAGE_OK(message):
+			if not self.__class__.MESSAGE_OK(message):
 				self._heatupDetected()
 
 		# sd state
-		elif RepRapProtocol.MESSAGE_SD_INIT_OK(message):
+		elif self.__class__.MESSAGE_SD_INIT_OK(message):
 			self._changeSdState(True)
-		elif RepRapProtocol.MESSAGE_SD_INIT_FAIL(message):
+		elif self.__class__.MESSAGE_SD_INIT_FAIL(message):
 			self._changeSdState(False)
 
 		# sd progress
-		elif RepRapProtocol.MESSAGE_SD_PRINTING_BYTE(message):
-			match = RepRapProtocol.REGEX_SD_PRINTING_BYTE.search(message)
+		elif self.__class__.MESSAGE_SD_PRINTING_BYTE(message):
+			match = self.__class__.REGEX_SD_PRINTING_BYTE.search(message)
 			if isinstance(self._current_file, PrintingSdFileInformation):
 				self._current_file.setFilepos(int(match.group(1)))
 			self._reportProgress()
-		elif RepRapProtocol.MESSAGE_SD_DONE_PRINTING(message):
+		elif self.__class__.MESSAGE_SD_DONE_PRINTING(message):
 			if isinstance(self._current_file, PrintingSdFileInformation):
 				self._current_file.setFilepos(0)
 			self._changeState(State.OPERATIONAL)
 			self._finishPrintjob()
 
 		# sd file list
-		elif RepRapProtocol.MESSAGE_SD_BEGIN_FILE_LIST(message):
+		elif self.__class__.MESSAGE_SD_BEGIN_FILE_LIST(message):
 			self._resetSdFiles()
 			self._receivingSdFileList = True
-		elif RepRapProtocol.MESSAGE_SD_END_FILE_LIST(message):
+		elif self.__class__.MESSAGE_SD_END_FILE_LIST(message):
 			self._receivingSdFileList = False
 			self._sendSdFiles()
 
 		# sd file selection
-		elif RepRapProtocol.MESSAGE_SD_FILE_OPENED(message):
-			match = RepRapProtocol.REGEX_FILE_OPENED.search(message)
+		elif self.__class__.MESSAGE_SD_FILE_OPENED(message):
+			match = self.__class__.REGEX_FILE_OPENED.search(message)
 			self._selectFile(PrintingSdFileInformation(match.group(1), int(match.group(2))))
 
 		# sd file streaming
-		elif RepRapProtocol.MESSAGE_SD_BEGIN_WRITING(message):
+		elif self.__class__.MESSAGE_SD_BEGIN_WRITING(message):
 			self._changeState(State.STREAMING)
-		elif RepRapProtocol.MESSAGE_SD_END_WRITING(message):
+		elif self.__class__.MESSAGE_SD_END_WRITING(message):
 			self.refresh_sd_files()
 
 		# firmware specific messages
 		if not self._evaluate_firmware_specific_messages(source, message):
 			return
 
-		# initial handshake with the firmware
-		if RepRapProtocol.MESSAGE_START(message):
-			if self._state != State.CONNECTED:
-				# we received a "start" while running, this means the printer has unexpectedly reset
-				self._changeState(State.CONNECTED)
-			self._reset(from_start=True)
-
 		if not self.is_streaming():
 			if time.time() > self._lastTemperatureUpdate + self._temperature_interval:
 				self._send_temperature_query(with_type=True)
 			elif self.is_sd_printing() and time.time() > self._lastSdProgressUpdate + self._sdstatus_interval:
 				self._send_sd_progress_query(with_type=True)
-
-		# ok == go ahead with sending
-		if RepRapProtocol.MESSAGE_OK(message):
-			if self._state == State.CONNECTED and self._startSeen:
-				# if we are currently connected, have seen start and just gotten an "ok" we are now operational
-				self._changeState(State.OPERATIONAL)
-			if self.is_heating_up():
-				self._heatupDone()
-
-			if not self._previous_resend:
-				# our most left line from the nack_lines just got acknowledged
-				self._process_acknowledgement()
-			else:
-				self._previous_resend = False
-			self._clear_for_send.set()
-			return
 
 	def onTimeoutReceived(self, source):
 		if self._transport != source:
@@ -520,9 +521,9 @@ class RepRapProtocol(Protocol):
 	##~~ private
 
 	def _process_acknowledgement(self):
-		with self._nack_lock:
-			if len(self._nack_lines) > 0:
-				entry = self._nack_lines.popleft()
+		with self._sent_lock:
+			if len(self._sent_lines) > 0:
+				entry = self._sent_lines.popleft()
 
 				# process command as acknowledged
 				self._process_command(entry.command, "acknowledged", with_line_number=entry.line_number)
@@ -536,10 +537,10 @@ class RepRapProtocol(Protocol):
 						# if we got a callback, call it
 						entry.command.callback(entry.command)
 
-				if len(self._nack_lines) > 0:
+				if len(self._sent_lines) > 0:
 					# let's take a look at the next item in the nack queue, it might be a special entry demanding some action
 					# from us now
-					following_entry = self._nack_lines[0]
+					following_entry = self._sent_lines[0]
 					if isinstance(following_entry, SpecialCommandQueueEntry):
 
 						if following_entry.type == SpecialCommandQueueEntry.TYPE_JOBDONE:
@@ -551,12 +552,12 @@ class RepRapProtocol(Protocol):
 								self._finishPrintjob()
 
 						# let's remove the special command, we should have processed it now...
-						self._nack_lines.popleft()
+						self._sent_lines.popleft()
 
 			# since we just got an acknowledgement, no more resends are pending
 			self._last_resend_number = None
 			self._current_resend_count = 0
-			self._nacks_before_resend = 0
+			self._sent_before_resend = 0
 
 	def _evaluate_firmware_specific_messages(self, source, message):
 		return True
@@ -604,22 +605,22 @@ class RepRapProtocol(Protocol):
 		self._send(command, with_progress=dict(completion=self._getPrintCompletion(), filepos=self._getPrintFilepos()))
 
 	def _send_temperature_query(self, with_high_priority=False, with_type=False):
-		self._send(RepRapProtocol.COMMAND_GET_TEMP(), high_priority=with_high_priority, command_type=RepRapProtocol.COMMAND_TYPE_TEMPERATURE if with_type else None)
+		self._send(self.__class__.COMMAND_GET_TEMP(), high_priority=with_high_priority, command_type=self.__class__.COMMAND_TYPE_TEMPERATURE if with_type else None)
 		self._lastTemperatureUpdate = time.time()
 
 	def _send_sd_progress_query(self, with_high_priority=False, with_type=False):
-		self._send(RepRapProtocol.COMMAND_SD_STATUS(), high_priority=with_high_priority, command_type=RepRapProtocol.COMMAND_TYPE_SD_PROGRESS if with_type else None)
+		self._send(self.__class__.COMMAND_SD_STATUS(), high_priority=with_high_priority, command_type=self.__class__.COMMAND_TYPE_SD_PROGRESS if with_type else None)
 		self._lastSdProgressUpdate = time.time()
 
 	def _handle_errors(self, line):
-		if RepRapProtocol.MESSAGE_ERROR(line):
-			if RepRapProtocol.MESSAGE_ERROR_MULTILINE(line):
+		if self.__class__.MESSAGE_ERROR(line):
+			if self.__class__.MESSAGE_ERROR_MULTILINE(line):
 				error = self._transport.receive()
 			else:
-				error = RepRapProtocol.TRANSFORM_ERROR(line)
+				error = self.__class__.TRANSFORM_ERROR(line)
 
 			# skip the communication errors as those get corrected via resend requests
-			if RepRapProtocol.MESSAGE_ERROR_COMMUNICATION(error):
+			if self.__class__.MESSAGE_ERROR_COMMUNICATION(error):
 				self._last_comm_error = error
 				pass
 			# handle the error
@@ -630,7 +631,7 @@ class RepRapProtocol(Protocol):
 	def _parse_temperatures(self, line):
 		result = {}
 		maxToolNum = 0
-		for match in re.finditer(RepRapProtocol.REGEX_TEMPERATURE, line):
+		for match in re.finditer(self.__class__.REGEX_TEMPERATURE, line):
 			tool = match.group(1)
 			toolNumber = int(match.group(2)) if match.group(2) and len(match.group(2)) > 0 else None
 			if toolNumber > maxToolNum:
@@ -673,6 +674,7 @@ class RepRapProtocol(Protocol):
 
 		elif not "T0" in parsedTemps.keys() and "T" in parsedTemps.keys():
 			# Smoothieware sends multi extruder temperature data this way: "T:<first extruder> T1:<second extruder> ..." and therefore needs some special treatment...
+			# TODO: Move to Smoothieware sub class?
 			_, actual, target = parsedTemps["T"]
 			del parsedTemps["T"]
 			parsedTemps["T0"] = (0, actual, target)
@@ -718,16 +720,16 @@ class RepRapProtocol(Protocol):
 		self._last_comm_error = None
 
 		if line_to_resend is not None:
-			with self._nack_lock:
-				if len(self._nack_lines) > 0:
-					nack_entry = self._nack_lines[0]
+			with self._sent_lock:
+				if len(self._sent_lines) > 0:
+					nack_entry = self._sent_lines[0]
 
 					if last_comm_error is not None and \
-							RepRapProtocol.MESSAGE_ERROR_COMMUNICATION_LINENUMBER(last_comm_error) \
+							self.__class__.MESSAGE_ERROR_COMMUNICATION_LINENUMBER(last_comm_error) \
 							and line_to_resend == self._last_resend_number \
-							and self._current_resend_count < self._nacks_before_resend:
+							and self._current_resend_count < self._sent_before_resend:
 						# this resend is a complaint about the wrong line_number, we already resent the requested
-						# one and didn't see more resend requests for those yet than we had additional lines in the nack
+						# one and didn't see more resend requests for those yet than we had additional lines in the sent
 						# buffer back then, so this is probably caused by leftovers in the printer's receive buffer
 						# (that got sent after the firmware cleared the receive buffer but before we'd fully processed
 						# the old resend request), we'll therefore just increment our counter and ignore this
@@ -739,12 +741,12 @@ class RepRapProtocol(Protocol):
 						# were additional lines in the nack buffer when we saw the first one, so we'll have to handle it
 						self._last_resend_number = line_to_resend
 						self._current_resend_count = 0
-						self._nacks_before_resend = len(self._nack_lines) - 1
+						self._sent_before_resend = len(self._sent_lines) - 1
 
 					if nack_entry.line_number is not None and nack_entry.line_number == line_to_resend:
 						try:
 							while True:
-								entry = self._nack_lines.popleft()
+								entry = self._sent_lines.popleft()
 								entry.priority = CommandQueueEntry.PRIORITY_RESEND
 								try:
 									self._send_queue.put(entry)
@@ -769,8 +771,8 @@ class RepRapProtocol(Protocol):
 
 				# reset line number local and remote
 				self._current_line = 1
-				self._nack_lines.clear()
-				self._send(RepRapProtocol.COMMAND_SET_LINE(0))
+				self._sent_lines.clear()
+				self._send(self.__class__.COMMAND_SET_LINE(0))
 
 	##~~ handle queue filling in this thread when printing or streaming
 
@@ -805,7 +807,7 @@ class RepRapProtocol(Protocol):
 				continue
 
 			try:
-				with self._nack_lock:
+				with self._sent_lock:
 					sent = self._send_from_queue()
 			except SendTimeout:
 				# we just got a send timeout, so we'll just try again on the next loop iteration
@@ -828,7 +830,7 @@ class RepRapProtocol(Protocol):
 			return False
 
 		if isinstance(item, SpecialCommandQueueEntry):
-			self._nack_lines.append(item)
+			self._sent_lines.append(item)
 		else:
 			if item.prepared is None:
 				prepared, line_number = self._prepare_for_sending(item.command, with_line_number=item.line_number)
@@ -839,7 +841,7 @@ class RepRapProtocol(Protocol):
 			if item.prepared is not None:
 				# only actually send the command if it wasn't filtered out by preprocessing
 
-				current_size = sum(self._nack_lines)
+				current_size = sum(self._sent_lines)
 				new_size = current_size + item.size
 				if new_size > self._rx_cache_size > 0 and not (current_size == 0):
 					# Do not send if the left over space in the buffer is too small for this line. Exception: the buffer is empty
@@ -851,7 +853,7 @@ class RepRapProtocol(Protocol):
 				self._transport.send(item.prepared)
 
 				# add the queue item into the deque of commands not yet acknowledged
-				self._nack_lines.append(item)
+				self._sent_lines.append(item)
 			else:
 				self._logger.debug("Dropping command which was disabled through preprocessing: %s" % item.command)
 
