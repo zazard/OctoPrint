@@ -190,15 +190,38 @@ class CommandQueue(Queue.Queue):
 			del self.lookup[item.command_type]
 		return item
 
-	def _item_at(self, index):
+	def _entry_at(self, index):
 		try:
-			return self.queue[index][2]
+			return self.queue[index]
 		except IndexError:
 			return None
 
+	def _del(self, entry, heapify=True):
+		item = entry[2]
+		try:
+			self.queue.remove(entry)
+			if heapify:
+				heapq.heapify(self.queue)
+		except ValueError:
+			# that's ok, the entry probably just got removed already e.g. by print cancelling
+			pass
+
+		if item.command_type in self.lookup:
+			del self.lookup[item.command_type]
+
 	def peek(self):
+		"""
+		Returns the left most entry, result is either a tuple (priority, counter, CommandQueueEntry) or None (if queue
+		was empty).
+		"""
+
 		with self.mutex:
-			return self._item_at(0)
+			entry = self._entry_at(0)
+			return entry[2] if entry is not None else None, entry
+
+	def remove(self, entry):
+		with self.mutex:
+			self._del(entry)
 
 	def clear(self, matcher=None):
 		if matcher is None:
@@ -208,9 +231,8 @@ class CommandQueue(Queue.Queue):
 			for entry in self.queue[:]:
 				priority, counter, item = entry
 				if matcher(item):
-					if item.command_type in self.lookup:
-						del self.lookup[item.command_type]
-					self.queue.remove(entry)
+					self._del(entry, heapify=False)
+			heapq.heapify(self.queue)
 
 	def __repr__(self):
 		return repr(self.queue)

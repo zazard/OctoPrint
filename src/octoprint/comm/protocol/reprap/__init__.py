@@ -817,8 +817,8 @@ class RepRapProtocol(Protocol):
 				self._clear_for_send.wait()
 
 	def _send_from_queue(self):
-		entry = self._send_queue.peek()
-		if entry is None:
+		item, entry = self._send_queue.peek()
+		if item is None:
 			if ((self._state == State.PRINTING and not isinstance(self._current_file, PrintingSdFileInformation))
 			    or self._state == State.STREAMING):
 				self._logger.warn("Buffer under run while printing!")
@@ -827,20 +827,20 @@ class RepRapProtocol(Protocol):
 		if not self._startSeen:
 			return False
 
-		if isinstance(entry, SpecialCommandQueueEntry):
-			self._nack_lines.append(entry)
+		if isinstance(item, SpecialCommandQueueEntry):
+			self._nack_lines.append(item)
 		else:
-			if entry.prepared is None:
-				prepared, line_number = self._prepare_for_sending(entry.command, with_line_number=entry.line_number)
+			if item.prepared is None:
+				prepared, line_number = self._prepare_for_sending(item.command, with_line_number=item.line_number)
 
-				entry.prepared = prepared
-				entry.line_number = line_number
+				item.prepared = prepared
+				item.line_number = line_number
 
-			if entry.prepared is not None:
+			if item.prepared is not None:
 				# only actually send the command if it wasn't filtered out by preprocessing
 
 				current_size = sum(self._nack_lines)
-				new_size = current_size + entry.size
+				new_size = current_size + item.size
 				if new_size > self._rx_cache_size > 0 and not (current_size == 0):
 					# Do not send if the left over space in the buffer is too small for this line. Exception: the buffer is empty
 					# and the line still doesn't fit
@@ -848,21 +848,16 @@ class RepRapProtocol(Protocol):
 
 				# send the command - we might get a SendTimeout here which is supposed to bubble up since it's caught in the
 				# actual send loop
-				self._transport.send(entry.prepared)
+				self._transport.send(item.prepared)
 
-				# add the queue entry into the deque of commands not yet acknowledged
-				self._nack_lines.append(entry)
+				# add the queue item into the deque of commands not yet acknowledged
+				self._nack_lines.append(item)
 			else:
-				self._logger.debug("Dropping command which was disabled through preprocessing: %s" % entry.command)
+				self._logger.debug("Dropping command which was disabled through preprocessing: %s" % item.command)
 
 		# remove from send queue
 		self._fill_queue_semaphore.release()
-		try:
-			self._send_queue.get(block=False)
-		except Queue.Empty:
-			# that's ok, we might just have asynchronously cancelled the whole print job
-			# TODO but we only remove the commands from the print job, so this will eat a line!!!
-			pass
+		self._send_queue.remove(entry)
 
 		return True
 
