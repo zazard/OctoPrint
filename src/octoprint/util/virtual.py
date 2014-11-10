@@ -334,11 +334,9 @@ class VirtualPrinter():
 
 		if "M109" in line:
 			self._waitForHeatup("tool%d" % tool)
-			return
-		else:
-			if settings().getBoolean(["devel", "virtualPrinter", "repetierStyleTargetTemperature"]):
-				self.outgoing.put("TargetExtr%d:%d" % (tool, self.targetTemp[tool]))
-			self._sendOk()
+		if settings().getBoolean(["devel", "virtualPrinter", "repetierStyleTargetTemperature"]):
+			self.outgoing.put("TargetExtr%d:%d" % (tool, self.targetTemp[tool]))
+		self._sendOk()
 
 	def _parseBedCommand(self, line):
 		try:
@@ -348,11 +346,9 @@ class VirtualPrinter():
 
 		if "M190" in line:
 			self._waitForHeatup("bed")
-			return
-		else:
-			if settings().getBoolean(["devel", "virtualPrinter", "repetierStyleTargetTemperature"]):
-				self.outgoing.put("TargetBed:%d" % self.bedTargetTemp)
-			self._sendOk()
+		if settings().getBoolean(["devel", "virtualPrinter", "repetierStyleTargetTemperature"]):
+			self.outgoing.put("TargetBed:%d" % self.bedTargetTemp)
+		self._sendOk()
 
 	def _performMove(self, line):
 		matchX = re.search("X([0-9.]+)", line)
@@ -493,14 +489,13 @@ class VirtualPrinter():
 			toolNum = int(heater[len("tool"):])
 			while self.temp[toolNum] < self.targetTemp[toolNum] - delta or self.temp[toolNum] > self.targetTemp[toolNum] + delta:
 				self._simulateTemps(delta=delta)
-				self.outgoing.put("T:%0.2f /%0.2f" % (self.temp[toolNum], self.targetTemp[toolNum]))
+				self.outgoing.put("T:%0.2f" % self.temp[toolNum])
 				time.sleep(delay)
 		elif heater == "bed":
 			while self.bedTemp < self.bedTargetTemp - delta or self.bedTemp > self.bedTargetTemp + delta:
 				self._simulateTemps(delta=delta)
-				self.outgoing.put("B:%0.2f /%0.2f" % (self.bedTemp, self.bedTargetTemp))
+				self.outgoing.put("B:%0.2f" % self.bedTemp)
 				time.sleep(delay)
-		self._sendOk()
 
 	def _deleteSdFile(self, filename):
 		f = os.path.join(self._virtualSd, filename)
