@@ -166,6 +166,11 @@ class RepRapProtocol(Protocol):
 		self._state = State.OFFLINE
 
 		self._pluginManager = octoprint.plugin.plugin_manager()
+		self._gcode_hooks = dict(
+			queued=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.queued").values(),
+			sent=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.sent").values(),
+			acknowledged=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.acknowledged").values()
+		)
 
 		self._preprocessors = dict()
 		self._setup_preprocessors()
@@ -226,8 +231,6 @@ class RepRapProtocol(Protocol):
 		self._rx_cache_size = protocol_options["buffer"] if "buffer" in protocol_options else 0
 		self._temperature_interval = protocol_options["timeout"]["temperature"] if "timeout" in protocol_options and "temperature" in protocol_options["timeout"] else 5.0
 		self._sdstatus_interval = protocol_options["timeout"]["sdstatus"] if "timeout" in protocol_options and "sdstatus" in protocol_options["timeout"] else 5.0
-
-		self._gcode_hooks = self._pluginManager.get_hooks("octoprint.comm.protocol.gcode")
 
 		self._reset()
 
@@ -576,12 +579,6 @@ class RepRapProtocol(Protocol):
 			if entry.command is not None:
 				entry.command.progress = with_progress
 		else:
-			#handle our hooks, if any
-			for hook in self._gcode_hooks:
-				hook_cmd = self._gcode_hooks[hook](self, command)
-				if hook_cmd and isinstance(hook_cmd, basestring):
-					command = hook_cmd
-
 			if not isinstance(command, GcodeCommand):
 				command = GcodeCommand.from_line(command)
 			command.progress = with_progress
@@ -882,6 +879,10 @@ class RepRapProtocol(Protocol):
 
 		if not phase in ("queued", "sent", "acknowledged"):
 			return None
+
+		#handle our hooks, if any
+		for hook in self._gcode_hooks[phase]:
+			command, with_line_number = hook(self, command, with_line_number=with_line_number)
 
 		if phase in self._preprocessors and command.command in self._preprocessors[phase]:
 			command, with_line_number = self._preprocessors[phase][command.command](command, with_line_number)
