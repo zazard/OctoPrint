@@ -146,7 +146,7 @@ class RepRapProtocol(Protocol):
 		self._sdstatus_interval = 5.0
 
 		self._sent_lines = deque([])
-		self._sent_lock = threading.RLock()
+		self._send_lock = threading.RLock()
 
 		self._previous_resend = False
 		self._last_comm_error = None
@@ -199,7 +199,7 @@ class RepRapProtocol(Protocol):
 				self._preprocessors[postfix][code] = getattr(self, attr)
 
 	def _reset(self, from_start=False):
-		with self._sent_lock:
+		with self._send_lock:
 			self._lastTemperatureUpdate = time.time()
 			self._lastSdProgressUpdate = time.time()
 
@@ -280,9 +280,10 @@ class RepRapProtocol(Protocol):
 
 		Protocol.cancel_print(self)
 
+	def _print_cancelled(self):
 		with self._fill_queue_mutex:
 			cleared = self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None and (not hasattr(entry, "prepared") or entry.prepared is None))
-			self._logger.debug("Cleared %d entries from the send queue: %r" % (len(cleared), cleared))
+			self._logger.debug("Cleared %d job entries from the send queue: %r" % (len(cleared), cleared))
 
 	def init_sd(self):
 		Protocol.init_sd(self)
@@ -537,7 +538,7 @@ class RepRapProtocol(Protocol):
 	##~~ private
 
 	def _process_acknowledgement(self):
-		with self._sent_lock:
+		with self._send_lock:
 			if len(self._sent_lines) > 0:
 				entry = self._sent_lines.popleft()
 
@@ -736,7 +737,7 @@ class RepRapProtocol(Protocol):
 		self._last_comm_error = None
 
 		if line_to_resend is not None:
-			with self._sent_lock:
+			with self._send_lock:
 				if len(self._sent_lines) > 0:
 					nack_entry = self._sent_lines[0]
 
@@ -823,7 +824,7 @@ class RepRapProtocol(Protocol):
 				continue
 
 			try:
-				with self._sent_lock:
+				with self._send_lock:
 					sent = self._send_from_queue()
 			except SendTimeout:
 				# we just got a send timeout, so we'll just try again on the next loop iteration

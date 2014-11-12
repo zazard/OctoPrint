@@ -205,12 +205,9 @@ class Printer():
 
 		# forward relevant state changes to gcode manager
 		if oldState == ProtocolState.PRINTING:
-			if self._selectedFile is not None:
-				if newState == ProtocolState.OPERATIONAL:
-					self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), True)
-				elif newState == ProtocolState.OFFLINE or newState == ProtocolState.ERROR:
-					self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), False)
 			self._analysisQueue.resume() # printing done, put those cpu cycles to good use
+			if self._selectedFile is not None and newState == ProtocolState.OFFLINE or newState == ProtocolState.ERROR:
+				self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), False)
 		elif newState == ProtocolState.PRINTING:
 			self._analysisQueue.pause()  # do not analyse files while printing
 
@@ -256,6 +253,16 @@ class Printer():
 
 		self._setProgressData(100.0, self._selectedFile["filesize"], self._protocol.get_print_time(), 0)
 		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
+
+		if self._selectedFile is not None:
+			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), True)
+
+	def onPrintjobCancelled(self, source):
+		if not source == self._protocol:
+			return
+
+		if self._selectedFile is not None:
+			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), False)
 
 	def onFileTransferStarted(self, source, filename, filesize):
 		if not source == self._protocol:

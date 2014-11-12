@@ -118,6 +118,12 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 			"origin": self._current_file.getFileLocation()
 		})
 		self._changeState(State.OPERATIONAL)
+		self._print_cancelled()
+		if self._protocol_listener is not None:
+			self._protocol_listener.onPrintjobCancelled(self)
+
+	def _print_cancelled(self):
+		pass
 
 	def init_sd(self):
 		pass
@@ -472,7 +478,13 @@ class ProtocolListener(object):
 	def onFileSelected(self, source, filename, filesize, origin):
 		pass
 
+	def onPrintjobStarted(self, source):
+		pass
+
 	def onPrintjobDone(self, source):
+		pass
+
+	def onPrintjobCancelled(self, source):
 		pass
 
 	def onFileTransferStarted(self, source, filename, filesize):
