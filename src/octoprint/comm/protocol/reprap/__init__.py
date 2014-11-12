@@ -280,7 +280,7 @@ class RepRapProtocol(Protocol):
 		Protocol.cancel_print(self)
 
 		with self._fill_queue_mutex:
-			self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None)
+			self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None and (not hasattr(entry, "prepared") or entry.prepared is None))
 
 	def init_sd(self):
 		Protocol.init_sd(self)
