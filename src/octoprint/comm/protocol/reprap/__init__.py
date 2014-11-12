@@ -133,7 +133,7 @@ class RepRapProtocol(Protocol):
 
 		self._send_queue = CommandQueue()
 
-		self._clear_for_send = CountedEvent(max=20)
+		self._clear_for_send = CountedEvent(max=10)
 
 		self._force_checksum = True
 		self._wait_for_start = False
@@ -159,7 +159,7 @@ class RepRapProtocol(Protocol):
 		self._thread.daemon = True
 		self._thread.start()
 
-		self._fill_queue_semaphore = threading.Semaphore(20)
+		self._fill_queue_semaphore = threading.BoundedSemaphore(10)
 		self._fill_queue_state_signal = threading.Event()
 		self._fill_queue_mutex = threading.Lock()
 		self._fill_queue_processing = True
@@ -280,7 +280,8 @@ class RepRapProtocol(Protocol):
 		Protocol.cancel_print(self)
 
 		with self._fill_queue_mutex:
-			self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None and (not hasattr(entry, "prepared") or entry.prepared is None))
+			cleared = self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None and (not hasattr(entry, "prepared") or entry.prepared is None))
+			self._logger.debug("Cleared %d entries from the send queue: %r" % (len(cleared), cleared))
 
 	def init_sd(self):
 		Protocol.init_sd(self)
@@ -872,7 +873,13 @@ class RepRapProtocol(Protocol):
 				self._logger.debug("Dropping command which was disabled through preprocessing: %s" % item.command)
 
 		# remove from send queue
-		self._fill_queue_semaphore.release()
+		try:
+			self._fill_queue_semaphore.release()
+		except ValueError:
+			# that's ok, the bounded semaphore complains that we just released more often than we acquired, but
+			# we do this explicitly an just use the bounded semaphore to guarantee an upper bound on the
+			# items added to the send queue by the fill thread
+			pass
 		self._send_queue.remove(entry)
 
 		return True

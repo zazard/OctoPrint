@@ -227,12 +227,15 @@ class CommandQueue(Queue.Queue):
 		if matcher is None:
 			matcher = lambda x: True
 
+		cleared = []
 		with self.mutex:
 			for entry in self.queue[:]:
 				priority, counter, item = entry
 				if matcher(item):
 					self._del(entry, heapify=False)
+					cleared.append(entry)
 			heapq.heapify(self.queue)
+		return cleared
 
 	def __repr__(self):
 		return repr(self.queue)
