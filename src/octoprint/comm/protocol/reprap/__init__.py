@@ -174,6 +174,7 @@ class RepRapProtocol(Protocol):
 		self._pluginManager = octoprint.plugin.plugin_manager()
 		self._gcode_hooks = dict(
 			queued=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.queued").values(),
+			sending=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.sending").values(),
 			sent=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.sent").values(),
 			acknowledged=self._pluginManager.get_hooks("octoprint.comm.protocol.gcode.acknowledged").values()
 		)
@@ -187,7 +188,7 @@ class RepRapProtocol(Protocol):
 		self._preprocessors.clear()
 
 		for attr in dir(self):
-			if attr.startswith("_gcode") and (attr.endswith("_queued") or attr.endswith("_sent") or attr.endswith("_acknowledged")):
+			if attr.startswith("_gcode") and (attr.endswith("_queued") or attr.endswith("_sending") or attr.endswith("_sent") or attr.endswith("_acknowledged")):
 				split_attr = attr.split("_")
 				if not len(split_attr) == 4:
 					continue
@@ -869,6 +870,8 @@ class RepRapProtocol(Protocol):
 
 				# add the queue item into the deque of commands not yet acknowledged
 				self._sent_lines.append(item)
+
+				self._process_command(item.command, "sent", with_line_number=item.line_number)
 			else:
 				self._logger.debug("Dropping command which was disabled through preprocessing: %s" % item.command)
 
@@ -890,7 +893,7 @@ class RepRapProtocol(Protocol):
 		if command is None:
 			return None, None, None
 
-		if not phase in ("queued", "sent", "acknowledged"):
+		if not phase in ("queued", "sending", "sent", "acknowledged"):
 			return None
 
 		#handle our hooks, if any
@@ -903,15 +906,16 @@ class RepRapProtocol(Protocol):
 		# blocking command?
 		if command is not None and command.command in self.__class__.BLOCKING_COMMANDS:
 			if phase == "sent":
-				self._logger.info("Waiting for a blocking command to finish")
+				self._logger.info("Waiting for a blocking command to finish: %s" % command.command)
 				self._blocking_command_active = True
 			elif phase == "acknowledged":
+				self._logger.info("Blocking command finished: %s" % command.command)
 				self._blocking_command_active = False
 
 		return command, with_line_number
 
 	def _prepare_for_sending(self, command, with_line_number=None):
-		command, with_line_number = self._process_command(command, "sent", with_line_number=with_line_number)
+		command, with_line_number = self._process_command(command, "sending", with_line_number=with_line_number)
 		if command is None or command.unknown:
 			return None, None
 
@@ -971,7 +975,7 @@ class RepRapProtocol(Protocol):
 			else:
 				self._current_temperature[key] = (None, target)
 
-	def _gcode_M110_sent(self, command, with_line_number):
+	def _gcode_M110_sending(self, command, with_line_number):
 		if command.n is not None:
 			new_line_number = command.n
 		else:
