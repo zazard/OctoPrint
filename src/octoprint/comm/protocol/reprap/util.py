@@ -144,15 +144,19 @@ class CommandQueueEntry(object):
 		return other + self._size
 
 	def __repr__(self):
-		return "CommandQueueEntry({command},line_number={line_number},prepared={prepared})".format(command=repr(self.command), line_number=self.line_number, prepared=self.prepared)
+		return "CommandQueueEntry({command},prepared={prepared})".format(command=repr(self.command), prepared=self.prepared)
 
 
 class SpecialCommandQueueEntry(CommandQueueEntry):
 	TYPE_JOBDONE = "JobDone"
+	TYPE_JOBCANCELLED = "JobCancelled"
 
 	def __init__(self, type):
 		CommandQueueEntry.__init__(self, CommandQueueEntry.PRIORITY_NORMAL, None)
 		self.type = type
+
+	def __repr__(self):
+		return "SpecialCommandQueueEntry(type={type})".format(type=self.type)
 
 
 class CommandQueue(Queue.Queue):
@@ -167,6 +171,9 @@ class CommandQueue(Queue.Queue):
 		self.queue = []
 		self.lookup = {}
 		self.counter = itertools.count()
+
+		import threading
+		self.clearlock = threading.RLock()
 
 	def _qsize(self, len=len):
 		return len(self.queue)
@@ -228,7 +235,7 @@ class CommandQueue(Queue.Queue):
 			matcher = lambda x: True
 
 		cleared = []
-		with self.mutex:
+		with self.clearlock:
 			for entry in self.queue[:]:
 				priority, counter, item = entry
 				if matcher(item):

@@ -825,7 +825,8 @@ class RepRapProtocol(Protocol):
 
 			try:
 				with self._send_lock:
-					sent = self._send_from_queue()
+					with self._send_queue.clearlock:
+						sent = self._send_from_queue()
 			except SendTimeout:
 				# we just got a send timeout, so we'll just try again on the next loop iteration
 				continue
