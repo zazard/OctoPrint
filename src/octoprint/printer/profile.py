@@ -12,6 +12,7 @@ import re
 
 from octoprint.settings import settings
 from octoprint.util import dict_merge, dict_clean
+from octoprint.events import Events, eventManager
 
 class SaveError(Exception):
 	pass
@@ -57,13 +58,16 @@ class PrinterProfileManager(object):
 	def select(self, identifier):
 		if identifier is None or not self.exists(identifier):
 			self._current = self.get_default()
+			eventManager().fire(Events.PRINTER_PROFILE_SELECTED, payload=dict(profile=self._current["id"]))
 			return False
 		else:
 			self._current = self.get(identifier)
+			eventManager().fire(Events.PRINTER_PROFILE_SELECTED, payload=dict(profile=self._current["id"]))
 			return True
 
 	def deselect(self):
 		self._current = None
+		eventManager().fire(Events.PRINTER_PROFILE_DESELECTED)
 
 	def get_all(self):
 		return self._load_all()
@@ -103,6 +107,7 @@ class PrinterProfileManager(object):
 			if make_default:
 				settings().set(["printerProfiles", "default"], identifier)
 
+		eventManager().fire(Events.PRINTER_PROFILE_MODIFIED, payload=dict(profile=identifier))
 		return self.get(identifier)
 
 	def get_default(self):

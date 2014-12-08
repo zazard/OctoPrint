@@ -84,6 +84,11 @@ class Events(object):
 	# Settings
 	SETTINGS_UPDATED = "SettingsUpdated"
 
+	# Printer Profiles
+	PRINTER_PROFILE_SELECTED = "PrinterProfileSelected"
+	PRINTER_PROFILE_DESELECTED = "PrinterProfileDeselected"
+	PRINTER_PROFILE_MODIFIED = "PrinterProfileModified"
+
 
 def eventManager():
 	global _instance

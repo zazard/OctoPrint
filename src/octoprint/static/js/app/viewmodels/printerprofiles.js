@@ -310,6 +310,12 @@ function PrinterProfilesViewModel() {
         return profile;
     };
 
+    self.onEvent = function(type, payload) {
+        if (type == "PrinterProfileSelected" || type == "PrinterProfileDeselected" || type == "PrinterProfileModified") {
+            self.requestData();
+        }
+    };
+
     self.onSettingsShown = self.requestData;
     self.onStartup = self.requestData;
 }

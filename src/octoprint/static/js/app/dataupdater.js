@@ -243,6 +243,13 @@ function DataUpdater(allViewModels) {
                         });
                         gcodeFilesViewModel.requestData(payload.remote, "sdcard");
                     }
+
+                    _.each(self.allViewModels, function(viewModel) {
+                        if (viewModel.hasOwnProperty("onEvent")) {
+                            viewModel.onEvent(type, payload);
+                        }
+                    });
+
                     break;
                 }
                 case "feedbackCommandOutput": {

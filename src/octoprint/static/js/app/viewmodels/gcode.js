@@ -101,33 +101,27 @@ function GcodeViewModel(loginStateViewModel, settingsViewModel) {
         var currentProfileData = self.settings.printerProfiles.currentProfileData();
         if (!currentProfileData) return;
 
+        var updatedOptions = {
+            reader: {},
+            renderer: {}
+        };
+
         var toolOffsets = self._retrieveToolOffsets(currentProfileData);
         if (toolOffsets) {
-            GCODE.ui.updateOptions({
-                reader: {
-                    toolOffsets: toolOffsets
-                }
-            });
-
+            updatedOptions["reader"]["toolOffsets"] = toolOffsets;
         }
 
         var bedDimensions = self._retrieveBedDimensions(currentProfileData);
         if (toolOffsets) {
-            GCODE.ui.updateOptions({
-                renderer: {
-                    bed: bedDimensions
-                }
-            });
+            updatedOptions["renderer"]["bed"] = bedDimensions;
         }
 
         var axesConfiguration = self._retrieveAxesConfiguration(currentProfileData);
         if (axesConfiguration) {
-            GCODE.ui.updateOptions({
-                renderer: {
-                    invertAxes: axesConfiguration
-                }
-            });
+            updatedOptions["renderer"]["invertAxes"] = axesConfiguration;
         }
+
+        GCODE.ui.updateOptions(updatedOptions);
     });
 
     self._retrieveBedDimensions = function(currentProfileData) {
@@ -213,22 +207,14 @@ function GcodeViewModel(loginStateViewModel, settingsViewModel) {
     self.currentLayer = undefined;
     self.currentCommand = undefined;
 
+    self.printerProfileChanged = false;
+
     self.initialize = function() {
         self._configureLayerSlider();
         self._configureLayerCommandSlider();
 
         self.settings.requestData(function() {
-            GCODE.ui.init({
-                container: "#gcode_canvas",
-                onProgress: self._onProgress,
-                onModelLoaded: self._onModelLoaded,
-                onLayerSelected: self._onLayerSelected,
-                bed: self._retrieveBedDimensions(),
-                toolOffsets: self._retrieveToolOffsets(),
-                invertAxes: self._retrieveAxesConfiguration()
-            });
-            self.synchronizeOptions();
-            self.enabled = true;
+            self.initGcodeUi();
         });
     };
 
@@ -237,6 +223,19 @@ function GcodeViewModel(loginStateViewModel, settingsViewModel) {
         self.loadedFilename = undefined;
         self.loadedFileDate = undefined;
         self.clear();
+    };
+
+    self.initGcodeUi = function() {
+        GCODE.ui.init({
+            container: "#gcode_canvas",
+            onProgress: self._onProgress,
+            onModelLoaded: self._onModelLoaded,
+            onLayerSelected: self._onLayerSelected,
+            bed: self._retrieveBedDimensions(),
+            toolOffsets: self._retrieveToolOffsets(),
+            invertAxes: self._retrieveAxesConfiguration()
+        });
+        self.synchronizeOptions();
     };
 
     self.clear = function() {
@@ -473,6 +472,21 @@ function GcodeViewModel(loginStateViewModel, settingsViewModel) {
         self.currentCommand = tuple;
 
         GCODE.ui.changeSelectedCommands(self.layerSlider.slider("getValue"), tuple[0], tuple[1]);
+    };
+
+    self.onEvent = function(type, payload) {
+        switch (type) {
+            case "PrinterProfileSelected": {
+
+                break;
+            }
+            case "PrinterProfileModified": {
+                if (payload.hasOwnProperty("profile") && payload.profile == self.settings.printerProfiles.currentProfileData().id) {
+                    self.initGcodeUi();
+                }
+                break;
+            }
+        }
     };
 
     self.onDataUpdaterReconnect = function() {
