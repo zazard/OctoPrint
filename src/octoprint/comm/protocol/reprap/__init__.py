@@ -898,6 +898,9 @@ class RepRapProtocol(Protocol):
 		if not phase in ("queued", "sending", "sent", "acknowledged"):
 			return None
 
+		if phase == "acknowledged":
+			print("ACK for {command}".format(**locals()))
+
 		#handle our hooks, if any
 		for hook in self._gcode_hooks[phase]:
 			command, with_line_number = hook(self, command, with_line_number)

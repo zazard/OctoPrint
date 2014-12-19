@@ -772,11 +772,8 @@ class Printer():
 	def getCurrentConnection(self):
 		opt = self._protocol.get_current_connection()
 		if "port" in opt.keys() and "baudrate" in opt.keys():
-			return self._protocol.get_state(), opt["port"], opt["baudrate"], printer_profile = self._printerProfileManager.get_current_or_default()
-		return self._protocol.get_state(), None, None
-
-		port, baudrate = self._comm.getConnection()
-		return self._comm.getStateString(), port, baudrate
+			return self._protocol.get_state(), opt["port"], opt["baudrate"], self._printerProfileManager.get_current_or_default()
+		return self._protocol.get_state(), None, None, None
 
 	def isClosedOrError(self):
 		return self._protocol.get_state() == ProtocolState.OFFLINE or self._protocol == ProtocolState.ERROR
