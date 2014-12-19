@@ -344,11 +344,10 @@ class RepRapProtocol(Protocol):
 		elif type == "bed":
 			self.send_manually(self.__class__.COMMAND_SET_BED_TEMP(value, False))
 
-	def jog(self, axis, amount):
-		speeds = settings().get(["printerParameters", "movementSpeed", ["x", "y", "z"]], asdict=True)
+	def jog(self, axis, amount, speed):
 		commands = (
 			self.__class__.COMMAND_SET_RELATIVE_POSITIONING(),
-			self.__class__.COMMAND_MOVE_AXIS(axis, amount, speeds[axis]),
+			self.__class__.COMMAND_MOVE_AXIS(axis, amount, speed),
 			self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING()
 		)
 		self.send_manually(commands)
@@ -362,12 +361,10 @@ class RepRapProtocol(Protocol):
 		)
 		self.send_manually(commands)
 
-	def extrude(self, amount):
-		extrusionSpeed = settings().get(["printerParameters", "movementSpeed", "e"])
-
+	def extrude(self, amount, speed):
 		commands = (
 			self.__class__.COMMAND_SET_RELATIVE_POSITIONING(),
-			self.__class__.COMMAND_EXTRUDE(amount, extrusionSpeed),
+			self.__class__.COMMAND_EXTRUDE(amount, speed),
 			self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING()
 		)
 		self.send_manually(commands)
@@ -570,6 +567,9 @@ class RepRapProtocol(Protocol):
 
 						# let's remove the special command, we should have processed it now...
 						self._sent_lines.popleft()
+
+			else:
+				self._logger.warn("Ooops, got an ok but had no unacknowledged command O.o")
 
 			# since we just got an acknowledgement, no more resends are pending
 			self._last_resend_number = None
@@ -897,9 +897,6 @@ class RepRapProtocol(Protocol):
 
 		if not phase in ("queued", "sending", "sent", "acknowledged"):
 			return None
-
-		if phase == "acknowledged":
-			print("ACK for {command}".format(**locals()))
 
 		#handle our hooks, if any
 		for hook in self._gcode_hooks[phase]:

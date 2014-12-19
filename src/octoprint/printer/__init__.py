@@ -232,7 +232,7 @@ class Printer():
 		if not source == self._protocol:
 			return
 
-		self._setProgressData(progress["completion"], progress["filepos"], progress["printTime"], progress["printTimeLeft"])
+		self._setProgressData(progress["completion"], progress["filepos"], progress["printTime"])
 
 	def onZChange(self, source, oldZ, newZ):
 		if not source == self._protocol:
@@ -260,18 +260,18 @@ class Printer():
 		if not source == self._protocol:
 			return
 
-		self._setProgressData(100.0, self._selectedFile["filesize"], self._protocol.get_print_time(), 0)
+		self._setProgressData(100.0, self._selectedFile["filesize"], self._protocol.get_print_time())
 		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 		if self._selectedFile is not None:
-			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), True)
+			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), True, self._printerProfileManager.get_current_or_default()["id"])
 
 	def onPrintjobCancelled(self, source):
 		if not source == self._protocol:
 			return
 
 		if self._selectedFile is not None:
-			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), False)
+			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._protocol.get_print_time(), False, self._printerProfileManager.get_current_or_default()["id"])
 
 	def onFileTransferStarted(self, source, filename, filesize):
 		if not source == self._protocol:
@@ -280,7 +280,7 @@ class Printer():
 		self._sdStreaming = True
 
 		self._setJobData(filename, filesize, FileDestinations.SDCARD)
-		self._setProgressData(0.0, 0, 0, None)
+		self._setProgressData(0.0, 0, 0)
 		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def onFileTransferDone(self, source):
@@ -295,7 +295,7 @@ class Printer():
 		self._sdRemoteName = None
 		self._setCurrentZ(None)
 		self._setJobData(None, None, None)
-		self._setProgressData(None, None, None, None)
+		self._setProgressData(None, None, None)
 		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def onSdStateChange(self, source, sdAvailable):
@@ -408,13 +408,26 @@ class Printer():
 		self.command(commands)
 
 	def jog(self, axis, amount):
-		self._protocol.jog(axis, amount)
+		if not axis or not amount:
+			return
+
+		printer_profile = self._printerProfileManager.get_current_or_default()
+		axis = axis.lower()
+		if axis in printer_profile["axes"]:
+			speed = printer_profile["axes"][axis]["speed"]
+			self._protocol.jog(axis, amount, speed)
 
 	def home(self, axes):
 		self._protocol.home(axes)
 
 	def extrude(self, amount):
-		self._protocol.extrude(amount)
+		if not amount:
+			return
+
+		printer_profile = self._printerProfileManager.get_current_or_default()
+		if "e" in printer_profile["axes"]:
+			speed = printer_profile["axes"]["e"]["speed"]
+			self._protocol.extrude(amount, speed)
 
 	def changeTool(self, tool):
 		self._protocol.change_tool(tool)
@@ -438,12 +451,12 @@ class Printer():
 	def selectFile(self, filename, origin, printAfterSelect=False):
 		self._printAfterSelect = printAfterSelect
 		self._protocol.select_file(filename, origin)
-		self._setProgressData(0, None, None, None)
+		self._setProgressData(0, None, None)
 		self._setCurrentZ(None)
 
 	def unselectFile(self):
 		self._protocol.deselect_file()
-		self._setProgressData(0, None, None, None)
+		self._setProgressData(0, None, None)
 		self._setCurrentZ(None)
 
 	def startPrint(self):
@@ -485,7 +498,7 @@ class Printer():
 
 		# reset progress, height, print time
 		self._setCurrentZ(None)
-		self._setProgressData(None, None, None, None)
+		self._setProgressData(None, None, None)
 
 		# mark print as failure
 		if self._selectedFile is not None:
@@ -522,7 +535,7 @@ class Printer():
 			return None
 
 		else:
-			newEstimate = printTime / progress
+			newEstimate = printTime * 100 / progress
 			self._timeEstimationData.update(newEstimate)
 
 			result = None
@@ -537,28 +550,28 @@ class Printer():
 
 			return result
 
-	def _setProgressData(self, progress, filepos, printTime, cleanedPrintTime):
-		estimatedTotalPrintTime = self._estimateTotalPrintTime(progress, cleanedPrintTime)
+	def _setProgressData(self, progress, filepos, printTime):
+		estimatedTotalPrintTime = self._estimateTotalPrintTime(progress, printTime)
 		statisticalTotalPrintTime = None
 		totalPrintTime = estimatedTotalPrintTime
 
 		if self._selectedFile and "estimatedPrintTime" in self._selectedFile and self._selectedFile["estimatedPrintTime"]:
 			statisticalTotalPrintTime = self._selectedFile["estimatedPrintTime"]
-			if progress and cleanedPrintTime:
+			if progress and printTime:
 				if estimatedTotalPrintTime is None:
 					totalPrintTime = statisticalTotalPrintTime
 				else:
-					if progress < 0.5:
-						sub_progress = progress * 2
+					if progress < 50:
+						sub_progress = progress * 2 / 100
 					else:
 						sub_progress = 1.0
 					totalPrintTime = (1 - sub_progress) * statisticalTotalPrintTime + sub_progress * estimatedTotalPrintTime
 
-		#self._printTimeLogger.info("{progress};{cleanedPrintTime};{estimatedTotalPrintTime};{statisticalTotalPrintTime};{totalPrintTime}".format(**locals()))
+		#self._printTimeLogger.info("{progress};{printTime};{estimatedTotalPrintTime};{statisticalTotalPrintTime};{totalPrintTime}".format(**locals()))
 
 		self._progress = progress
 		self._printTime = printTime
-		self._printTimeLeft = totalPrintTime - cleanedPrintTime if (totalPrintTime is not None and cleanedPrintTime is not None) else None
+		self._printTimeLeft = totalPrintTime - printTime if (totalPrintTime is not None and printTime is not None) else None
 
 		self._stateMonitor.setProgress({
 			"completion": self._progress,
@@ -568,7 +581,7 @@ class Printer():
 		})
 
 		if progress:
-			progress_int = int(progress * 100)
+			progress_int = int(progress)
 			if self._lastProgressReport != progress_int:
 				self._lastProgressReport = progress_int
 				self._reportPrintProgressToPlugins(progress_int)

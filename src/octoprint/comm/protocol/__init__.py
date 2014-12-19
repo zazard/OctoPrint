@@ -27,6 +27,9 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 		self._heatup_start_time = None
 		self._heatup_time_lost = 0.0
 
+		self._pause_start_time = None
+		self._pause_time_lost = 0.0
+
 		self._current_file = None
 
 		self._current_z = 0.0
@@ -104,10 +107,16 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 		}
 
 		if self._state == State.PRINTING and not only_resume:
+			self._pause_start_time = time.time()
+
 			self._changeState(State.PAUSED)
 			eventManager().fire(Events.PRINT_PAUSED, payload)
 
 		elif self._state == State.PAUSED and not only_pause:
+			if self._pause_start_time:
+				self._pause_time_lost += time.time() - self._pause_start_time
+				self._pause_start_time = None
+
 			self._changeState(State.PRINTING)
 			eventManager().fire(Events.PRINT_RESUMED, payload)
 
@@ -163,19 +172,7 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 		if self._current_file is None or self._current_file.getStartTime() is None:
 			return None
 		else:
-			return max(int(time.time() - self._current_file.getStartTime() - self._heatup_time_lost), 0)
-
-	def get_print_time_remaining_estimate(self):
-		print_time = self.get_print_time()
-		if print_time is None:
-			return None
-
-		progress = self._current_file.getProgress()
-		if progress:
-			print_time_total = print_time / progress
-			return int(print_time_total - print_time)
-		else:
-			return None
+			return max(int(time.time() - self._current_file.getStartTime() - self._heatup_time_lost - self._pause_time_lost), 0)
 
 	def get_connection_options(self):
 		return self._transport.get_connection_options()
@@ -236,8 +233,7 @@ class Protocol(MessageReceiver, StateReceiver, LogReceiver):
 		progress = {
 			"completion": completion,
 			"filepos": filepos,
-			"printTime": self.get_print_time(),
-			"printTimeLeft": self.get_print_time_remaining_estimate()
+			"printTime": self.get_print_time()
 		}
 
 		self._progressReported(progress)
