@@ -67,10 +67,15 @@ class RepRapProtocol(Protocol):
 	COMMAND_SET_BED_TEMP = staticmethod(lambda s, w: GcodeCommand("M190", s=s) if w else GcodeCommand("M140", s=s))
 	COMMAND_SET_RELATIVE_POSITIONING = staticmethod(lambda: GcodeCommand("G91"))
 	COMMAND_SET_ABSOLUTE_POSITIONING = staticmethod(lambda: GcodeCommand("G90"))
+	COMMAND_SET_RELATIVE_EXTRUDER = staticmethod(lambda: GcodeCommand("M83"))
+	COMMAND_SET_ABSOLUTE_EXTRUDER = staticmethod(lambda: GcodeCommand("M82"))
 	COMMAND_MOVE_AXIS = staticmethod(lambda axis, amount, speed: GcodeCommand("G1", x=amount if axis=='x' else None, y=amount if axis=='y' else None, z=amount if axis=='z' else None, f=speed))
+	COMMAND_MOVE = staticmethod(lambda x, y, z, speed: GcodeCommand("G1", x=x if x is not None else None, y=y if y is not None else None, z=z if z is not None else None, f=speed))
 	COMMAND_EXTRUDE = staticmethod(lambda amount, speed: GcodeCommand("G1", e=amount, f=speed))
 	COMMAND_HOME_AXIS = staticmethod(lambda x, y, z: GcodeCommand("G28", x=0 if x else None, y=0 if y else None, z=0 if z else None))
 	COMMAND_SET_TOOL = staticmethod(lambda t: GcodeCommand("T%d" % t))
+	COMMAND_SET_POSITION = staticmethod(lambda x, y, z, e: GcodeCommand("G92", x=x if x is not None else None, y=y if y is not None else None, z=z if z is not None else None, e=e if e is not None else None))
+	COMMAND_GET_POSITION = staticmethod(lambda: GcodeCommand("M114"))
 	COMMAND_SD_REFRESH = staticmethod(lambda: GcodeCommand("M20"))
 	COMMAND_SD_INIT = staticmethod(lambda: GcodeCommand("M21"))
 	COMMAND_SD_RELEASE = staticmethod(lambda: GcodeCommand("M22"))
@@ -116,6 +121,13 @@ class RepRapProtocol(Protocol):
 	# to be fetched from the transport layer in order to fully handle the error at hand.
 	REGEX_ERROR_MULTILINE = re.compile("Error:[0-9]\n")
 
+	# Regex matching M114 output: "X:<x>Y:<y>Z:<z>E:<e> ..."
+	# - 1: current X
+	# - 2: current Y
+	# - 3: current Z
+	# - 4: current E
+	REGEX_POSITION = re.compile("X:([-+]?\d*\.?\d+)\s*Y:([-+]?\d*\.?\d+)\s*Z:([-+]?\d*\.?\d+)\s*E:([-+]?\d*\.?\d+)")
+
 	BLOCKING_COMMANDS = (
 		"M109", "M190",                                             # set and wait for temperature (hotend & bed)
 		"G28",                                                      # home
@@ -158,6 +170,11 @@ class RepRapProtocol(Protocol):
 		self._thread = threading.Thread(target=self._handle_send_queue, name="SendQueueHandler")
 		self._thread.daemon = True
 		self._thread.start()
+
+		self._last_queried_position = None
+		self._last_seen_f = None
+
+		self._output = []
 
 		self._fill_queue_semaphore = threading.BoundedSemaphore(10)
 		self._fill_queue_state_signal = threading.Event()
@@ -231,6 +248,10 @@ class RepRapProtocol(Protocol):
 			self._current_resend_count = 0
 			self._sent_before_resend = 0
 
+			self._output = []
+			self._last_queried_position = None
+			self._last_seen_f = None
+
 	def connect(self, protocol_options, transport_options):
 		self._wait_for_start = protocol_options["waitForStart"] if "waitForStart" in protocol_options else False
 		self._force_checksum = protocol_options["checksum"] if "checksum" in protocol_options else True
@@ -284,6 +305,67 @@ class RepRapProtocol(Protocol):
 		with self._fill_queue_mutex:
 			cleared = self._send_queue.clear(matcher=lambda entry: entry is not None and entry.command is not None and hasattr(entry.command, "progress") and entry.command.progress is not None and (not hasattr(entry, "prepared") or entry.prepared is None))
 			self._logger.debug("Cleared %d job entries from the send queue: %r" % (len(cleared), cleared))
+
+	def pause_print(self, only_pause=None, only_resume=None):
+		wasPaused = self._state == State.PAUSED
+		Protocol.pause_print(self, only_pause=only_pause, only_resume=only_resume)
+		isPaused = self._state == State.PAUSED
+
+		if wasPaused == isPaused:
+			# nothing changed, either we are still printing or we are still paused
+			return
+
+		if not wasPaused:
+			# printer was printing, now paused
+			def positionCallback(command):
+				print("### command: %s" % command.command)
+				print("### output: %r" % command.output)
+				if command.output is None:
+					return
+
+				for line in command.output:
+					match = self.__class__.REGEX_POSITION.search(line)
+					if match is None:
+						continue
+
+					try:
+						x = float(match.group(1))
+						y = float(match.group(2))
+						z = float(match.group(3))
+						e = float(match.group(4))
+						self._last_queried_position = (x, y, z, e)
+						print("### set last_queried_position: %r" % (self._last_queried_position,))
+					except ValueError:
+						self._last_queried_position = None
+						print("### set last_queried_position: %r" % (self._last_queried_position,))
+					else:
+						self._send(self.__class__.COMMAND_SET_RELATIVE_EXTRUDER())      # relative extruder
+						self._send(self.__class__.COMMAND_EXTRUDE(-4.5, 6000))          # retract
+						self._send(self.__class__.COMMAND_SET_RELATIVE_POSITIONING())   # relative positioning
+						self._send(self.__class__.COMMAND_MOVE_AXIS("z", 15, 7800))     # move z up a bit
+						self._send(self.__class__.COMMAND_HOME_AXIS(True, True, False)) # home x/y
+						self._send(self.__class__.COMMAND_SET_ABSOLUTE_POSITIONING())   # absolute positioning
+						self._send(self.__class__.COMMAND_SET_ABSOLUTE_EXTRUDER())      # absolute extruder
+
+			# fetch the current position, once we have that we can continue
+			positionCommand = self.__class__.COMMAND_GET_POSITION()
+			positionCommand.callback = positionCallback
+			self._send(positionCommand)
+
+		else:
+			# printer was paused, now resuming
+			print("### get last_queried_position: %r" % (self._last_queried_position,))
+			if self._last_queried_position is not None:
+				x, y, z, e = self._last_queried_position
+				f = self._last_seen_f if self._last_seen_f else 7800
+				self._send(self.__class__.COMMAND_SET_RELATIVE_EXTRUDER())              # relative extruder
+				self._send(self.__class__.COMMAND_EXTRUDE(4.5, 6000))                   # prime the nozzle
+				self._send(self.__class__.COMMAND_EXTRUDE(-4.5, 6000))                  # prime the nozzle
+				self._send(self.__class__.COMMAND_MOVE(x, y, z, f))                     # move back to former x, y, z
+				self._send(self.__class__.COMMAND_EXTRUDE(4.5, 300))                    # extrude a bit of material
+				self._send(self.__class__.COMMAND_SET_ABSOLUTE_EXTRUDER())              # absolute extruder
+				self._send(self.__class__.COMMAND_SET_POSITION(None, None, None, e))    # define current as old e
+				self._send(self.__class__.COMMAND_MOVE(None, None, None, f))            # set speed
 
 	def init_sd(self):
 		Protocol.init_sd(self)
@@ -405,6 +487,10 @@ class RepRapProtocol(Protocol):
 			return
 
 		message = self._handle_errors(message.strip())
+
+		if message:
+			self._output.append(message)
+			print("--- output: %r" % self._output)
 
 		##~~ Control message processing: ok, resend, start, wait
 
@@ -535,9 +621,16 @@ class RepRapProtocol(Protocol):
 	##~~ private
 
 	def _process_acknowledgement(self):
+		output = self._output
+		self._output = []
+
 		with self._send_lock:
 			if len(self._sent_lines) > 0:
 				entry = self._sent_lines.popleft()
+
+				if entry.command is not None:
+					entry.command.output = output
+					print("!!! Adding output to command %s: %r (entry: %r)" % (entry.command.command, entry.command.output, entry))
 
 				# process command as acknowledged
 				self._process_command(entry.command, "acknowledged", with_line_number=entry.line_number)
@@ -804,6 +897,7 @@ class RepRapProtocol(Protocol):
 
 				if self._fill_queue_semaphore.acquire(0.5):
 					self._send_next()
+					print("/// sent next line from file: %r" % self._fill_queue_semaphore._Semaphore__value)
 
 
 	##~~ the actual send queue handling starts here
@@ -872,6 +966,7 @@ class RepRapProtocol(Protocol):
 
 				# add the queue item into the deque of commands not yet acknowledged
 				self._sent_lines.append(item)
+				print("+++ sent: %r" % item)
 
 				self._process_command(item.command, "sent", with_line_number=item.line_number)
 			else:
@@ -945,8 +1040,9 @@ class RepRapProtocol(Protocol):
 
 	def _gcode_G0_acknowledged(self, command, with_line_number):
 		if command.z is not None:
-			z = command.z
-			self._reportZChange(z)
+			self._reportZChange(command.z)
+		if command.f is not None:
+			self._last_seen_f = command.f
 		return command, with_line_number
 	_gcode_G1_acknowledged = _gcode_G0_acknowledged
 
