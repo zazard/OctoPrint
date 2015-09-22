@@ -15,7 +15,7 @@
             <td class="settings_plugin_cura_profiles_key"><span class="icon-star" data-bind="invisible: !isdefault()"></span> <span data-bind="text: key"></span></td>
             <td class="settings_plugin_cura_profiles_name" data-bind="text: name"></td>
             <td class="settings_plugin_cura_profiles_actions">
-                <a href="#" class="icon-star" title="{{ _('Make default') }}" data-bind="enable: !isdefault(), css: {disabled: isdefault()}, click: function() { if (!$data.isdefault()) { $root.makeProfileDefault($data); } }"></a>&nbsp;|&nbsp;<a href="#" class="icon-trash" title="{{ _('Delete Profile') }}" data-bind="enable: !isdefault(), css: {disabled: isdefault()}, click: function() { if (!$data.isdefault()) { $root.removeProfile($data); } }"></a>
+                <a href="#" class="icon-star" title="{{ _('Make default') }}" data-bind="enable: !isdefault(), css: {disabled: isdefault()}, click: function() { if (!$data.isdefault()) { $root.makeProfileDefault($data); } }"></a>&nbsp;|&nbsp;<a href="#" class="icon-pencil" title="{{ _('Edit Profile') }}" data-bind="click: function() { $root.showEditProfileDialog($data); }, css: {disabled: $root.requestInProgress()}, enabled: !$root.requestInProgress()"></a>&nbsp;|&nbsp;<a href="#" class="icon-trash" title="{{ _('Delete Profile') }}" data-bind="enable: !isdefault(), css: {disabled: isdefault()}, click: function() { if (!$data.isdefault()) { $root.removeProfile($data); } }"></a>
             </td>
         </tr>
         </tbody>
@@ -30,5 +30,455 @@
         <ul>
             <li data-bind="css: {disabled: profiles.currentPage() === profiles.lastPage()}"><a href="#" data-bind="click: profiles.nextPage">»</a></li>
         </ul>
+    </div>
+</div>
+
+<div id="settings_curaProfile_editDialog" class="modal hide fade large">
+    <div class="modal-header">
+        <a href="#" class="close" data-dismiss="modal" aria-hidden="true">&times;</a>
+        <h3 class="modal-title"></h3>
+    </div>
+    <div class="modal-body">
+        <div class="full-sized-box">
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Quality') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Layer Height') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Initial Layer Height') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Line Width') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Shell') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Shell Thickness') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Wall Thickness') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Bottom/Top Thickness') }}</label>
+                            <div class="controls">
+                                <div class="input-append input-block">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Compensate Wall Overlaps') }}</label>
+                            <div class="controls">
+                                <div class="input-append input-block">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Infill') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Infill Density') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Infill Pattern') }}</label>
+                            <div class="controls">
+                                <select>
+                                    <option>Grid</option>
+                                    <option>Lines</option>
+                                    <option>Concentric</option>
+                                    <option>Zig Zag</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Infill Overlap') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Infill Thickness') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Material') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Printing Temperature') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">ºC</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Bed Temperature') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">ºC</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Diameter') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Flow') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Enable Retraction') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Retraction Distance') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Retraction Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Retraction Minimum Travel') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Z Hop when Retracting') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Speed') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Print Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Infill Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Shell Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Travel Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Bottom Layer Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm/s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Travel') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Enable Combing') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Cooling') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Enable Cooling Fan') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Fan Speed') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Fan Full on at Layer') }}</label>
+                            <div class="controls">
+                                <div class="input">
+                                    <input type="number">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Minimal Layer Time') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Support') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Enable Support') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Placement') }}</label>
+                            <div class="controls">
+                                <select>
+                                    <option>Touching Buildplate</option>
+                                    <option>Everywhere</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('X/Y Distance') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Z Distance') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Enable Hammock') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Use Towers') }}</label>
+                            <div class="controls checkbox">
+                                <input type="checkbox">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Pattern') }}</label>
+                            <div class="controls">
+                                <select>
+                                    <option>Lines</option>
+                                    <option>Grid</option>
+                                    <option>Triangles</option>
+                                    <option>Concentric</option>
+                                    <option>Zig Zag</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Fill Amount') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <div><h4><a href="#" class="muted" onclick="$(this).children().toggleClass('icon-caret-right icon-caret-down').parent().parent().parent().next().slideToggle('fast')"><i class="icon-caret-right"></i> {{ _('Platform Adhesion') }}</a></h4></div>
+                <div class="hide">
+                    <form class="form-horizontal">
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Type') }}</label>
+                            <div class="controls">
+                                <select>
+                                    <option>Skirt</option>
+                                    <option>Brim</option>
+                                    <option>Raft</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Skirt Line Count') }}</label>
+                            <div class="controls">
+                                <div class="input">
+                                    <input type="number">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Skirt Distance') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Skirt Minimum Distance') }}</label>
+                            <div class="controls">
+                                <div class="input-append">
+                                    <input type="number">
+                                    <span class="add-on">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">{{ _('Brim Line Count') }}</label>
+                            <div class="controls">
+                                <div class="input">
+                                    <input type="number">
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button class="btn" data-dismiss="modal" aria-hidden="true">{{ _('Abort') }}</button>
+        <button class="btn btn-primary btn-confirm">{{ _('Confirm') }}</button>
     </div>
 </div>

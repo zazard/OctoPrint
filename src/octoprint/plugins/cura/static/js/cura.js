@@ -28,8 +28,13 @@ $(function() {
         self.unconfiguredCuraEngine = ko.observable();
         self.unconfiguredSlicingProfile = ko.observable();
 
+        self.requestInProgress = ko.observable(false);
+        self.editorNew = ko.observable(false);
+
         self.uploadElement = $("#settings-cura-import");
         self.uploadButton = $("#settings-cura-import-start");
+
+        self.settings_curaProfile_editDialog = $('#settings_curaProfile_editDialog');
 
         self.profiles = new ItemListHelper(
             "plugin_cura_profiles",
@@ -266,6 +271,35 @@ $(function() {
         self.onWizardFinish = function() {
             self.resetPathTest();
         };
+
+        self.showEditProfileDialog = function(data) {
+
+            // show settings, ensure centered position
+            self.settings_curaProfile_editDialog.modal({
+                minHeight: function() { return Math.max($.fn.modal.defaults.maxHeight() - 80, 250); }
+            }).css({
+                width: 'auto',
+                'margin-left': function() { return -($(this).width() /2); }
+            });
+
+            var add = false;
+            if (data == undefined) {
+                data = self._cleanProfile();
+                add = true;
+            }
+
+            self.editorNew(add);
+
+            var editDialog = $("#settings_curaProfile_editDialog");
+            var dialogTitle = $("h3.modal-title", editDialog);
+
+            dialogTitle.text(add ? gettext("Add Printer Profile") : _.sprintf(gettext("Edit Printer Profile \"%(name)s\""), {name: data.name}));
+
+            editDialog.modal("show");
+        };
+
+
+
     }
 
     // view model class, parameters for constructor, container to bind to
