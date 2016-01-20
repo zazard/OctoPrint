@@ -9,6 +9,7 @@ import requests
 import logging
 
 from ..exceptions import ConfigurationInvalid
+from octoprint.util.version import parse_version
 
 RELEASE_URL = "https://api.github.com/repos/{user}/{repo}/releases"
 
@@ -95,8 +96,8 @@ def _is_current(release_information, compare_type, custom=None, force_base=True)
 
 	try:
 		if compare_type == "python":
-			local_version = _get_comparable_version_pkg_resources(sanitized_local, force_base=force_base)
-			remote_version = _get_comparable_version_pkg_resources(sanitized_remote, force_base=force_base)
+			local_version = parse_version(sanitized_local, base=force_base)
+			remote_version = parse_version(sanitized_remote, base=force_base)
 			return local_version >= remote_version
 
 		elif compare_type == "semantic":

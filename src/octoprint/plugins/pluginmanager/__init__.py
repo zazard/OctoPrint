@@ -13,6 +13,7 @@ from octoprint.settings import valid_boolean_trues
 from octoprint.server.util.flask import restricted_access
 from octoprint.server import admin_permission, VERSION
 from octoprint.util.pip import PipCaller, UnknownPip
+from octoprint.util.version import parse_version, version_matches_any_spec
 
 from flask import jsonify, make_response
 from flask.ext.babel import gettext
@@ -550,7 +551,8 @@ class PluginManagerPlugin(octoprint.plugin.SimpleApiPlugin,
 				return False
 
 		current_os = self._get_os()
-		octoprint_version = self._get_octoprint_version(base=True)
+		from octoprint import __version__ as octoprint_version
+		parsed_octoprint_version = parse_version(octoprint_version)
 
 		def map_repository_entry(entry):
 			result = dict(entry)
@@ -565,7 +567,7 @@ class PluginManagerPlugin(octoprint.plugin.SimpleApiPlugin,
 
 			if "compatibility" in entry:
 				if "octoprint" in entry["compatibility"] and entry["compatibility"]["octoprint"] is not None and len(entry["compatibility"]["octoprint"]):
-					result["is_compatible"]["octoprint"] = self._is_octoprint_compatible(octoprint_version, entry["compatibility"]["octoprint"])
+					result["is_compatible"]["octoprint"] = self._is_octoprint_compatible(parsed_octoprint_version, entry["compatibility"]["octoprint"])
 
 				if "os" in entry["compatibility"] and entry["compatibility"]["os"] is not None and len(entry["compatibility"]["os"]):
 					result["is_compatible"]["os"] = self._is_os_compatible(current_os, entry["compatibility"]["os"])
@@ -580,17 +582,10 @@ class PluginManagerPlugin(octoprint.plugin.SimpleApiPlugin,
 		Tests if the current ``octoprint_version`` is compatible to any of the provided ``compatibility_entries``.
 		"""
 
-		for octo_compat in compatibility_entries:
-			if not any(octo_compat.startswith(c) for c in ("<", "<=", "!=", "==", ">=", ">", "~=", "===")):
-				octo_compat = ">={}".format(octo_compat)
-
-			s = next(pkg_resources.parse_requirements("OctoPrint" + octo_compat))
-			if octoprint_version in s:
-				break
-		else:
-			return False
-
-		return True
+		spec_matcher = ("<", "<=", "!=", "==", ">=", ">", "~=", "===")
+		specs = map(lambda x: x if any(x.startswith(c) for c in spec_matcher) else ">={}".format(x),
+		                    compatibility_entries)
+		return version_matches_any_spec(octoprint_version, specs, package="OctoPrint", base=True)
 
 	def _is_os_compatible(self, current_os, compatibility_entries):
 		"""
@@ -607,31 +602,6 @@ class PluginManagerPlugin(octoprint.plugin.SimpleApiPlugin,
 			return "macos"
 		else:
 			return "unknown"
-
-	def _get_octoprint_version_string(self):
-		return VERSION
-
-	def _get_octoprint_version(self, base=False):
-		octoprint_version_string = self._get_octoprint_version_string()
-
-		if "-" in octoprint_version_string:
-			octoprint_version_string = octoprint_version_string[:octoprint_version_string.find("-")]
-
-		octoprint_version = pkg_resources.parse_version(octoprint_version_string)
-		if base:
-			if isinstance(octoprint_version, tuple):
-				# old setuptools
-				base_version = []
-				for part in octoprint_version:
-					if part.startswith("*"):
-						break
-					base_version.append(part)
-				base_version.append("*final")
-				octoprint_version = tuple(base_version)
-			else:
-				# new setuptools
-				octoprint_version = pkg_resources.parse_version(octoprint_version.base_version)
-		return octoprint_version
 
 	def _to_external_representation(self, plugin):
 		return dict(
