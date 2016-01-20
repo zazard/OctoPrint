@@ -461,7 +461,11 @@ def create_plugin_setup_parameters(identifier="todo", name="TODO", version="0.1"
 		requires = ["OctoPrint"]
 	if not isinstance(requires, list):
 		raise ValueError("requires must be a list")
-	if "OctoPrint" not in requires:
+	for require in requires:
+		requirement = pkg_resources.Requirement.parse(require)
+		if requirement.key == "octoprint":
+			break
+	else:
 		requires = ["OctoPrint"] + list(requires)
 
 	if extra_requires is None:
