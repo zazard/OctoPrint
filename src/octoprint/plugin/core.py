@@ -29,6 +29,8 @@ import logging
 import pkg_resources
 import pkginfo
 
+from octoprint.util.version import version_matches_spec
+
 EntryPointOrigin = namedtuple("EntryPointOrigin", "type, entry_point, module_name, package_name, package_version")
 FolderOrigin = namedtuple("FolderOrigin", "type, folder")
 
@@ -430,7 +432,7 @@ class PluginManager(object):
 
 	def __init__(self, plugin_folders, plugin_types, plugin_entry_points, logging_prefix=None,
 	             plugin_disabled_list=None, plugin_restart_needing_hooks=None, plugin_obsolete_hooks=None,
-	             plugin_validators=None):
+	             plugin_validators=None, plugin_checked_module_dependencies=None):
 		self.logger = logging.getLogger(__name__)
 
 		if logging_prefix is None:
@@ -445,6 +447,7 @@ class PluginManager(object):
 		self.plugin_restart_needing_hooks = plugin_restart_needing_hooks
 		self.plugin_obsolete_hooks = plugin_obsolete_hooks
 		self.plugin_validators = plugin_validators
+		self.plugin_dependency_checks = plugin_checked_module_dependencies
 		self.logging_prefix = logging_prefix
 
 		self.enabled_plugins = dict()
@@ -544,6 +547,20 @@ class PluginManager(object):
 				module_name = entry_point.module_name
 				version = entry_point.dist.version
 
+				if self.plugin_dependency_checks:
+					requires = entry_point.dist.requires()
+					missing_requirements = []
+					for require in requires:
+						if require.key in self.plugin_dependency_checks:
+							available_version = self.plugin_dependency_checks[require.key]
+							spec = str(require.specifier)
+							if not version_matches_spec(available_version, spec, package=require.key, base=True):
+								missing_requirements.append("{}{}".format(require.key, spec))
+
+					if missing_requirements:
+						self.logger.warn("Plugin \"{}\" is missing requirements, skipping it: {}".format(key, ", ".join(missing_requirements)))
+						continue
+
 				if key in existing or key in result or (ignore_uninstalled and key in self.marked_plugins["uninstalled"]):
 					# plugin is already defined or marked as uninstalled, ignore it
 					continue
@@ -572,7 +589,8 @@ class PluginManager(object):
 
 		return result
 
-	def _import_plugin_from_module(self, key, folder=None, module_name=None, name=None, version=None, summary=None, author=None, url=None, license=None):
+	def _import_plugin_from_module(self, key, folder=None, module_name=None, name=None, version=None, summary=None,
+	                               author=None, url=None, license=None):
 		# TODO error handling
 		try:
 			if folder:

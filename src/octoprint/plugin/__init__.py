@@ -44,7 +44,8 @@ def _validate_plugin(phase, plugin_info):
 			setattr(plugin_info.instance, PluginInfo.attr_hooks, hooks)
 
 def plugin_manager(init=False, plugin_folders=None, plugin_types=None, plugin_entry_points=None, plugin_disabled_list=None,
-                   plugin_restart_needing_hooks=None, plugin_obsolete_hooks=None, plugin_validators=None):
+                   plugin_restart_needing_hooks=None, plugin_obsolete_hooks=None, plugin_validators=None,
+                   plugin_checked_module_dependencies=None):
 	"""
 	Factory method for initially constructing and consecutively retrieving the :class:`~octoprint.plugin.core.PluginManager`
 	singleton.
@@ -70,6 +71,8 @@ def plugin_manager(init=False, plugin_folders=None, plugin_types=None, plugin_en
 	    plugin_obsolete_hooks (list): A list of hooks that have been declared obsolete. Plugins implementing them will
 	        not be enabled since they might depend on functionality that is no longer available.
 	    plugin_validators (list): A list of additional plugin validators through which to process each plugin.
+	    plugin_checked_module_dependencies (dict): A dictionary of package name-version-pairs for which to enable
+	        dependency checking during plugin loading.
 
 	Returns:
 	    PluginManager: A fully initialized :class:`~octoprint.plugin.core.PluginManager` instance to be used for plugin
@@ -120,6 +123,9 @@ def plugin_manager(init=False, plugin_folders=None, plugin_types=None, plugin_en
 				plugin_validators = [
 					_validate_plugin
 				]
+			if plugin_checked_module_dependencies is None:
+				from octoprint import __version__ as octoprint_version
+				plugin_checked_module_dependencies = dict(octoprint=octoprint_version)
 
 			_instance = PluginManager(plugin_folders,
 			                          plugin_types,
@@ -128,7 +134,8 @@ def plugin_manager(init=False, plugin_folders=None, plugin_types=None, plugin_en
 			                          plugin_disabled_list=plugin_disabled_list,
 			                          plugin_restart_needing_hooks=plugin_restart_needing_hooks,
 			                          plugin_obsolete_hooks=plugin_obsolete_hooks,
-			                          plugin_validators=plugin_validators)
+			                          plugin_validators=plugin_validators,
+			                          plugin_checked_module_dependencies=plugin_checked_module_dependencies)
 		else:
 			raise ValueError("Plugin Manager not initialized yet")
 	return _instance
