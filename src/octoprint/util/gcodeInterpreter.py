@@ -103,6 +103,9 @@ class Vector3D(object):
 	def __rmul__(self, other):
 		return self.__mul__(other)
 
+	def __neg__(self):
+		return Vector3D(-self.x, -self.y, -self.z)
+
 	def __abs__(self):
 		return Vector3D(abs(self.x), abs(self.y), abs(self.z))
 
