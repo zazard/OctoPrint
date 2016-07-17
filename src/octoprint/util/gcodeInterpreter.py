@@ -262,6 +262,64 @@ class gcode(object):
 			# time to add is maximum of both
 			memory.totalMoveTimeMinute += max(moveTimeXYZ, extrudeTime)
 
+		def g2_g3_command(target, offset, e, f, clockwise):
+			radius = math.hypot(offset.x, offset.y)
+			center = memory.pos + offset
+			extruder_travel = e
+			if memory.absoluteE:
+				extruder_travel -= memory.currentE[memory.currentExtruder]
+
+			r_axis = -offset
+			rt_axis = target - center
+
+			angular_travel = math.atan2(r_axis.x * rt_axis.y - r_axis.y * rt_axis.x,
+										r_axis.x * rt_axis.x + r_axis.y * rt_axis.y)
+			if (not clockwise and angular_travel <= 0.00001) or (clockwise and angular_travel < -0.000001):
+				angular_travel += 2.0 * math.pi
+			if clockwise:
+				angular_travel -= 2.0 * math.pi
+
+			if self._memory.position == target and angular_travel == 0:
+				angular_travel += 2.0 * math.pi
+
+			mm_of_travel = math.fabs(angular_travel) * radius
+			if mm_of_travel < 0.001:
+				return
+
+			segments = int(math.floor(mm_of_travel / memory.mm_per_arc_segment))
+			if segments == 0:
+				segments = 1
+
+			theta_per_segment = angular_travel / segments
+			extrude_per_segment = extruder_travel / segments
+
+			cos_t = 1 - 0.5 * theta_per_segment * theta_per_segment
+			sin_t = theta_per_segment
+
+			arc_target = Vector3D(0.0, 0.0, 0.0)
+
+			e_target = memory.currentE[memory.currentExtruder] if memory.absoluteE else 0
+
+			count = 0
+			for i in range(1, segments):
+				if count < memory.n_arc_correction:
+					r_axis = Vector3D(r_axis.x * cos_t - r_axis.y * sin_t, r_axis.x * sin_t + r_axis.y * cos_t,
+									  r_axis.z)
+					count += 1
+				else:
+					cos_ti = math.cos(i * theta_per_segment)
+					sin_ti = math.sin(i * theta_per_segment)
+					r_axis = Vector3D(-offset.x * cos_ti + offset.y * sin_ti, -offset.x * sin_ti - offset.y * cos_ti)
+					count = 0
+
+				arc_target.x = center.x + r_axis.x
+				arc_target.y = center.y + r_axis.y
+				e_target += extrude_per_segment
+
+				g0_g1_command(arc_target.x, arc_target.y, memory.pos.z, e_target, f)
+
+			g0_g1_command(target.x, target.y, memory.pos.z, e, f)
+
 		for line in gcodeFile:
 			if self._abort:
 				raise AnalysisAborted()
@@ -319,7 +377,16 @@ class gcode(object):
 					f = getCodeFloat(line, 'F')
 
 					g0_g1_command(x, y, z, e, f)
+				elif G == 2 or G == 3:
+					x = getCodeFloat(line, 'X')
+					y = getCodeFloat(line, 'Y')
+					i = getCodeFloat(line, 'I')
+					j = getCodeFloat(line, 'J')
 
+					e = getCodeFloat(line, 'E')
+					f = getCodeFloat(line, 'F')
+
+					g2_g3_command(Vector3D(x, y, memory.pos.z), Vector3D(i, j, 0.0), e, f, G == 2)
 				elif G == 4:	#Delay
 					S = getCodeFloat(line, 'S')
 					if S is not None:
