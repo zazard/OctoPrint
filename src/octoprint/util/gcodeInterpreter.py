@@ -333,13 +333,9 @@ class gcode(object):
 					if x is None and y is None and z is None:
 						pos = center
 					else:
-						pos = Vector3D(pos)
-						if x is not None:
-							pos.x = center.x
-						if y is not None:
-							pos.y = center.y
-						if z is not None:
-							pos.z = center.z
+						pos = Vector3D(center.x if x is not None else pos.x,
+									   center.y if y is not None else pos.y,
+									   center.z if z is not None else pos.z)
 				elif G == 90:	#Absolute position
 					posAbs = True
 				elif G == 91:	#Relative position
@@ -351,13 +347,10 @@ class gcode(object):
 					e = getCodeFloat(line, 'E')
 					if e is not None:
 						currentE[currentExtruder] = e
-					if x is not None:
-						posOffset.x = pos.x - x
-					if y is not None:
-						posOffset.y = pos.y - y
-					if z is not None:
-						posOffset.z = pos.z - z
 
+					posOffset = Vector3D((pos.x - x) if x is not None else posOffset.x,
+										 (pos.y - y) if y is not None else posOffset.y,
+										 (pos.z - z) if z is not None else posOffset.z)
 			elif M is not None:
 				if M == 82:   #Absolute E
 					absoluteE = True
@@ -377,13 +370,15 @@ class gcode(object):
 				if T > settings().getInt(["gcodeAnalysis", "maxExtruders"]):
 					self._logger.warn("GCODE tried to select tool %d, that looks wrong, ignoring for GCODE analysis" % T)
 				else:
-					posOffset.x -= offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0
-					posOffset.y -= offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0
+					posOffset -= Vector3D(offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0.0,
+										  offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0.0,
+										  0.0)
 
 					currentExtruder = T
 
-					posOffset.x += offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0
-					posOffset.y += offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0
+					posOffset += Vector3D(offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0.0,
+										  offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0.0,
+										  0.0)
 
 					if len(currentE) <= currentExtruder:
 						for i in range(len(currentE), currentExtruder + 1):
