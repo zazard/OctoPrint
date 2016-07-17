@@ -216,6 +216,8 @@ class gcode(object):
 			fwretractTime = 0
 			fwretractDist = 0
 			fwrecoverTime = 0
+			feedrate_multiplicator = 1.0
+			flowrate_multiplicator = 1.0
 			feedrate = min(printer_profile["axes"]["x"]["speed"], printer_profile["axes"]["y"]["speed"])
 			if feedrate == 0:
 				# some somewhat sane default if axes speeds are insane...
@@ -376,6 +378,12 @@ class gcode(object):
 					e = getCodeFloat(line, 'E')
 					f = getCodeFloat(line, 'F')
 
+					if e is not None:
+						e *= memory.flowrate_multiplicator
+
+					if f is not None:
+						f *= memory.feedrate_multiplicator
+
 					g0_g1_command(x, y, z, e, f)
 				elif G == 2 or G == 3:
 					x = getCodeFloat(line, 'X')
@@ -385,6 +393,12 @@ class gcode(object):
 
 					e = getCodeFloat(line, 'E')
 					f = getCodeFloat(line, 'F')
+
+					if e is not None:
+						e *= memory.flowrate_multiplicator
+
+					if f is not None:
+						f *= memory.feedrate_multiplicator
 
 					g2_g3_command(Vector3D(x, y, memory.pos.z), Vector3D(i, j, 0.0), e, f, G == 2)
 				elif G == 4:	#Delay
@@ -442,6 +456,10 @@ class gcode(object):
 							memory.fwretractDist = s
 						else:
 							memory.fwrecoverTime = (memory.fwretractDist + s) / f
+				elif M == 220:
+					memory.feedrate_multiplicator = getCodeInt(line, 'S') / 100.0
+				elif M == 221:
+					memory.flowrate_ultiplicator = getCodeInt(line, 'S') / 100.0
 
 			elif T is not None:
 				if T > settings().getInt(["gcodeAnalysis", "maxExtruders"]):
