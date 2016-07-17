@@ -281,7 +281,7 @@ class gcode(object):
 			if clockwise:
 				angular_travel -= 2.0 * math.pi
 
-			if self._memory.position == target and angular_travel == 0:
+			if memory.pos == target and angular_travel == 0:
 				angular_travel += 2.0 * math.pi
 
 			mm_of_travel = math.fabs(angular_travel) * radius
