@@ -202,24 +202,65 @@ class gcode(object):
 	def _load(self, gcodeFile, printer_profile, throttle=None):
 		filePos = 0
 		readBytes = 0
-		pos = Vector3D(0.0, 0.0, 0.0)
-		posOffset = Vector3D(0.0, 0.0, 0.0)
-		currentE = [0.0]
-		totalExtrusion = [0.0]
-		maxExtrusion = [0.0]
-		currentExtruder = 0
-		totalMoveTimeMinute = 0.0
-		absoluteE = True
-		scale = 1.0
-		posAbs = True
-		fwretractTime = 0
-		fwretractDist = 0
-		fwrecoverTime = 0
-		feedrate = min(printer_profile["axes"]["x"]["speed"], printer_profile["axes"]["y"]["speed"])
-		if feedrate == 0:
-			# some somewhat sane default if axes speeds are insane...
-			feedrate = 2000
-		offsets = printer_profile["extruder"]["offsets"]
+		class memory:
+			pos = Vector3D(0.0, 0.0, 0.0)
+			posOffset = Vector3D(0.0, 0.0, 0.0)
+			currentE = [0.0]
+			totalExtrusion = [0.0]
+			maxExtrusion = [0.0]
+			currentExtruder = 0
+			totalMoveTimeMinute = 0.0
+			absoluteE = True
+			scale = 1.0
+			posAbs = True
+			fwretractTime = 0
+			fwretractDist = 0
+			fwrecoverTime = 0
+			feedrate = min(printer_profile["axes"]["x"]["speed"], printer_profile["axes"]["y"]["speed"])
+			if feedrate == 0:
+				# some somewhat sane default if axes speeds are insane...
+				feedrate = 2000
+			offsets = printer_profile["extruder"]["offsets"]
+			mm_per_arc_segment = 1
+			n_arc_correction = 25
+
+
+		def g0_g1_command(x, y, z, e, f):
+			oldPos = memory.pos
+			newPos = Vector3D(x if x is not None else memory.pos.x,
+							  y if y is not None else memory.pos.y,
+							  z if z is not None else memory.pos.z)
+
+			if memory.posAbs:
+				memory.pos = newPos * memory.scale + memory.posOffset
+			else:
+				memory.pos += newPos * memory.scale
+			if f is not None and f != 0:
+				memory.feedrate = f
+
+			if e is not None:
+				if memory.absoluteE:
+					# make sure e is relative
+					e -= memory.currentE[memory.currentExtruder]
+				# If move includes extrusion, calculate new min/max coordinates of model
+				if e > 0.0:
+					# extrusion -> relevant for print area & dimensions
+					self._minMax.record(memory.pos)
+					memory.totalExtrusion[memory.currentExtruder] += e
+					memory.currentE[memory.currentExtruder] += e
+					memory.maxExtrusion[memory.currentExtruder] = max(memory.maxExtrusion[memory.currentExtruder],
+															   memory.totalExtrusion[memory.currentExtruder])
+			else:
+				e = 0.0
+
+			# move time in x, y, z, will be 0 if no movement happened
+			moveTimeXYZ = abs((oldPos - memory.pos).length / memory.feedrate)
+
+			# time needed for extruding, will be 0 if no extrusion happened
+			extrudeTime = abs(e / memory.feedrate)
+
+			# time to add is maximum of both
+			memory.totalMoveTimeMinute += max(moveTimeXYZ, extrudeTime)
 
 		for line in gcodeFile:
 			if self._abort:
@@ -277,121 +318,87 @@ class gcode(object):
 					e = getCodeFloat(line, 'E')
 					f = getCodeFloat(line, 'F')
 
-					oldPos = pos
-					newPos = Vector3D(x if x is not None else pos.x,
-					                  y if y is not None else pos.y,
-					                  z if z is not None else pos.z)
-
-					if posAbs:
-						pos = newPos * scale + posOffset
-					else:
-						pos += newPos * scale
-					if f is not None and f != 0:
-						feedrate = f
-
-					if e is not None:
-						if absoluteE:
-							# make sure e is relative
-							e -= currentE[currentExtruder]
-						# If move includes extrusion, calculate new min/max coordinates of model
-						if e > 0.0:
-							# extrusion -> relevant for print area & dimensions
-							self._minMax.record(pos)
-						totalExtrusion[currentExtruder] += e
-						currentE[currentExtruder] += e
-						maxExtrusion[currentExtruder] = max(maxExtrusion[currentExtruder],
-						                                    totalExtrusion[currentExtruder])
-					else:
-						e = 0.0
-
-					# move time in x, y, z, will be 0 if no movement happened
-					moveTimeXYZ = abs((oldPos - pos).length / feedrate)
-
-					# time needed for extruding, will be 0 if no extrusion happened
-					extrudeTime = abs(e / feedrate)
-
-					# time to add is maximum of both
-					totalMoveTimeMinute += max(moveTimeXYZ, extrudeTime)
+					g0_g1_command(x, y, z, e, f)
 
 				elif G == 4:	#Delay
 					S = getCodeFloat(line, 'S')
 					if S is not None:
-						totalMoveTimeMinute += S / 60.0
+						memory.totalMoveTimeMinute += S / 60.0
 					P = getCodeFloat(line, 'P')
 					if P is not None:
-						totalMoveTimeMinute += P / 60.0 / 1000.0
+						memory.totalMoveTimeMinute += P / 60.0 / 1000.0
 				elif G == 10:   #Firmware retract
-					totalMoveTimeMinute += fwretractTime
+					memory.totalMoveTimeMinute += memory.fwretractTime
 				elif G == 11:   #Firmware retract recover
-					totalMoveTimeMinute += fwrecoverTime
+					memory.totalMoveTimeMinute += memory.fwrecoverTime
 				elif G == 20:	#Units are inches
-					scale = 25.4
+					memory.scale = 25.4
 				elif G == 21:	#Units are mm
-					scale = 1.0
+					memory.scale = 1.0
 				elif G == 28:	#Home
 					x = getCodeFloat(line, 'X')
 					y = getCodeFloat(line, 'Y')
 					z = getCodeFloat(line, 'Z')
 					center = Vector3D(0.0, 0.0, 0.0)
 					if x is None and y is None and z is None:
-						pos = center
+						memory.pos = center
 					else:
-						pos = Vector3D(center.x if x is not None else pos.x,
-									   center.y if y is not None else pos.y,
-									   center.z if z is not None else pos.z)
+						memory.pos = Vector3D(center.x if x is not None else memory.pos.x,
+											  center.y if y is not None else memory.pos.y,
+									          center.z if z is not None else memory.pos.z)
 				elif G == 90:	#Absolute position
-					posAbs = True
+					memory.posAbs = True
 				elif G == 91:	#Relative position
-					posAbs = False
+					memory.posAbs = False
 				elif G == 92:
 					x = getCodeFloat(line, 'X')
 					y = getCodeFloat(line, 'Y')
 					z = getCodeFloat(line, 'Z')
 					e = getCodeFloat(line, 'E')
 					if e is not None:
-						currentE[currentExtruder] = e
+						memory.currentE[memory.currentExtruder] = e
 
-					posOffset = Vector3D((pos.x - x) if x is not None else posOffset.x,
-										 (pos.y - y) if y is not None else posOffset.y,
-										 (pos.z - z) if z is not None else posOffset.z)
+						memory.posOffset = Vector3D((memory.pos.x - x) if x is not None else memory.posOffset.x,
+													(memory.pos.y - y) if y is not None else memory.posOffset.y,
+													(memory.pos.z - z) if z is not None else memory.posOffset.z)
 			elif M is not None:
 				if M == 82:   #Absolute E
-					absoluteE = True
+					memory.absoluteE = True
 				elif M == 83:   #Relative E
-					absoluteE = False
+					memory.absoluteE = False
 				elif M == 207 or M == 208: #Firmware retract settings
 					s = getCodeFloat(line, 'S')
 					f = getCodeFloat(line, 'F')
 					if s is not None and f is not None:
 						if M == 207:
-							fwretractTime = s / f
-							fwretractDist = s
+							memory.fwretractTime = s / f
+							memory.fwretractDist = s
 						else:
-							fwrecoverTime = (fwretractDist + s) / f
+							memory.fwrecoverTime = (memory.fwretractDist + s) / f
 
 			elif T is not None:
 				if T > settings().getInt(["gcodeAnalysis", "maxExtruders"]):
 					self._logger.warn("GCODE tried to select tool %d, that looks wrong, ignoring for GCODE analysis" % T)
 				else:
-					posOffset -= Vector3D(offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0.0,
-										  offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0.0,
-										  0.0)
+					memory.posOffset -= Vector3D(memory.offsets[memory.currentExtruder][0] if memory.currentExtruder < len(memory.offsets) else 0.0,
+												 memory.offsets[memory.currentExtruder][1] if memory.currentExtruder < len(memory.offsets) else 0.0,
+										         0.0)
 
-					currentExtruder = T
+					memory.currentExtruder = T
 
-					posOffset += Vector3D(offsets[currentExtruder][0] if currentExtruder < len(offsets) else 0.0,
-										  offsets[currentExtruder][1] if currentExtruder < len(offsets) else 0.0,
-										  0.0)
+					memory.posOffset += Vector3D(memory.offsets[memory.currentExtruder][0] if memory.currentExtruder < len(memory.offsets) else 0.0,
+												 memory.offsets[memory.currentExtruder][1] if memory.currentExtruder < len(memory.offsets) else 0.0,
+										         0.0)
 
-					if len(currentE) <= currentExtruder:
-						for i in range(len(currentE), currentExtruder + 1):
-							currentE.append(0.0)
-					if len(maxExtrusion) <= currentExtruder:
-						for i in range(len(maxExtrusion), currentExtruder + 1):
-							maxExtrusion.append(0.0)
-					if len(totalExtrusion) <= currentExtruder:
-						for i in range(len(totalExtrusion), currentExtruder + 1):
-							totalExtrusion.append(0.0)
+					if len(memory.currentE) <= memory.currentExtruder:
+						for i in range(len(memory.currentE), memory.currentExtruder + 1):
+							memory.currentE.append(0.0)
+					if len(memory.maxExtrusion) <= memory.currentExtruder:
+						for i in range(len(memory.maxExtrusion), memory.currentExtruder + 1):
+							memory.maxExtrusion.append(0.0)
+					if len(memory.totalExtrusion) <= memory.currentExtruder:
+						for i in range(len(memory.totalExtrusion), memory.currentExtruder + 1):
+							memory.totalExtrusion.append(0.0)
 
 			if throttle is not None:
 				throttle()
@@ -399,12 +406,12 @@ class gcode(object):
 		if self.progressCallback is not None:
 			self.progressCallback(100.0)
 
-		self.extrusionAmount = maxExtrusion
-		self.extrusionVolume = [0] * len(maxExtrusion)
-		for i in range(len(maxExtrusion)):
+		self.extrusionAmount = memory.maxExtrusion
+		self.extrusionVolume = [0] * len(memory.maxExtrusion)
+		for i in range(len(memory.maxExtrusion)):
 			radius = self._filamentDiameter / 2
 			self.extrusionVolume[i] = (self.extrusionAmount[i] * (math.pi * radius * radius)) / 1000
-		self.totalMoveTimeMinute = totalMoveTimeMinute
+		self.totalMoveTimeMinute = memory.totalMoveTimeMinute
 
 	def _parseCuraProfileString(self, comment, prefix):
 		return {key: value for (key, value) in map(lambda x: x.split("=", 1), zlib.decompress(base64.b64decode(comment[len(prefix):])).split("\b"))}
