@@ -21,11 +21,20 @@ import threading
 import logging
 import netaddr
 import os
+import uuid
+import collections
+import pylru
+
+try:
+	from os import scandir, walk
+except ImportError:
+	from scandir import scandir, walk
 
 from octoprint.settings import settings
 import octoprint.server
 import octoprint.users
 import octoprint.plugin
+import octoprint.util
 
 from werkzeug.contrib.cache import BaseCache
 
@@ -476,6 +485,165 @@ class OctoPrintFlaskResponse(flask.Response):
 		flask.Response.set_cookie(self, key, expires=0, max_age=0, path=path, domain=domain)
 
 
+#~~ Sessions
+
+class ServerSideSession(collections.MutableMapping, flask.sessions.SessionMixin):
+
+	def __init__(self, sid, path, serializer, persistent=True, *args, **kwargs):
+		self.sid = sid
+		self.path = path
+
+		self._persistent = persistent
+		self._serializer = serializer
+
+		self._lock = threading.RLock()
+		self._data = dict()
+		self.read()
+
+	def __getitem__(self, key):
+		with self._lock:
+			return self._data[key]
+
+	def __setitem__(self, key, value):
+		with self._lock:
+			self._data[key] = value
+			self.save()
+
+	def __delitem__(self, key):
+		with self._lock:
+			del self._data[key]
+			self.save()
+
+	def __iter__(self):
+		with self._lock:
+			return iter(self._data)
+
+	def __len__(self):
+		with self._lock:
+			return len(self._data)
+
+	def read(self):
+		with self._lock:
+			try:
+				with open(self.path, "rb") as f:
+					self._data = self._serializer.loads(f.read())
+				return
+			except:
+				# TODO need to properly handle access errors here... logging!
+				pass
+
+			self._data = dict()
+			self.save()
+
+	def save(self):
+		if not self._persistent:
+			return
+
+		from octoprint.util import atomic_write
+		with self._lock:
+			with atomic_write(self.path, mode="wb") as f:
+				f.write(self._serializer.dumps(self._data))
+
+	def remove(self):
+		with self._lock:
+			try:
+				os.remove(self.path)
+			except:
+				# TODO need to properly handle access errors here... logging!
+				pass
+
+
+class ServerSideSessionInterface(flask.sessions.SessionInterface):
+
+	serializer = flask.sessions.session_json_serializer
+
+	session_class = ServerSideSession
+
+	def __init__(self, directory, persistent_callback=None, min_cleanup_interval=300):
+		self.directory = directory
+		self.persistent_callback = persistent_callback
+		self.min_cleanup_interval = min_cleanup_interval
+
+		self._cleanup_lock = threading.RLock()
+		self._last_cleanup = None
+
+		self._logger = logging.getLogger(__name__ + ".session")
+
+	def open_session(self, app, request):
+		self.cleanup_stale_sessions(app)
+
+		persistent = self.persistent_callback(app, request) if callable(self.persistent_callback) else True
+
+		sid = request.cookies.get(app.session_cookie_name)
+		try:
+			uuid.UUID(octoprint.util.to_str(sid))
+		except:
+			sid = None
+
+		if not sid:
+			sid = self.generate_sid()
+			if persistent:
+				self._logger.debug("Generated a new SID {} for path {}".format(sid, request.path))
+
+		return self.session_class(sid, self.path_for_sid(sid), self.serializer, persistent=persistent)
+
+	def save_session(self, app, session, response):
+		domain = self.get_cookie_domain(app)
+		path = self.get_cookie_path(app)
+
+		if not session:
+			self._logger.debug("Removing session with SID {}".format(session.sid))
+			session.remove()
+			if session.modified:
+				response.delete_cookie(app.session_cookie_name,
+				                       domain=domain, path=path)
+			return
+
+		httponly = self.get_cookie_httponly(app)
+		secure = self.get_cookie_secure(app)
+		expires = self.get_expiration_time(app, session)
+		response.set_cookie(app.session_cookie_name, session.sid,
+		                    httponly=httponly, secure=secure, expires=expires,
+		                    domain=domain, path=path)
+
+	def generate_sid(self):
+		while True:
+			sid = str(uuid.uuid4())
+			if not os.path.exists(self.path_for_sid(sid)):
+				return sid
+
+	def cleanup_stale_sessions(self, app):
+		if self._last_cleanup is not None and self._last_cleanup - time.time() < self.min_cleanup_interval:
+			return
+
+		maxage = flask.sessions.total_seconds(app.permanent_session_lifetime)
+		cutoff = time.time() - maxage
+
+		to_clean = []
+		with self._cleanup_lock:
+			for entry in scandir(self.directory):
+				try:
+					if entry.stat().st_mtime < cutoff:
+						to_clean.append(entry.path)
+				except:
+					if self._logger.isEnabledFor(logging.DEBUG):
+						self._logger.exception("Error while removing stale session {}".format(entry.name))
+
+			for path in to_clean:
+				try:
+					os.remove(path)
+				except:
+					# TODO logging in case of an error
+					pass
+
+			if to_clean:
+				self._logger.debug("Cleaned up {} stale sessions".format(len(to_clean)))
+
+			self._last_cleanup = time.time()
+
+	def path_for_sid(self, sid):
+		return os.path.join(self.directory, sid)
+
 #~~ passive login helper
 
 def passive_login():
@@ -609,7 +777,7 @@ def cached(timeout=5 * 60, key=lambda: "view:%s" % flask.request.path, unless=No
 	def decorator(f):
 		@functools.wraps(f)
 		def decorated_function(*args, **kwargs):
-			logger = logging.getLogger(__name__)
+			logger = logging.getLogger(__name__ + ".cache")
 
 			cache_key = key()
 

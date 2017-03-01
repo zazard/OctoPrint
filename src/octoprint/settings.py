@@ -224,7 +224,8 @@ default_settings = {
 		"scripts": None,
 		"translations": None,
 		"generated": None,
-		"data": None
+		"data": None,
+		"sessions": None
 	},
 	"temperature": {
 		"profiles": [

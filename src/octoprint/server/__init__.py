@@ -634,7 +634,8 @@ class Server(object):
 		return Locale.parse(request.accept_languages.best_match(LANGUAGES))
 
 	def _setup_app(self, app):
-		from octoprint.server.util.flask import ReverseProxiedEnvironment, OctoPrintFlaskRequest, OctoPrintFlaskResponse
+		from octoprint.server.util.flask import ReverseProxiedEnvironment, OctoPrintFlaskRequest, \
+			OctoPrintFlaskResponse, ServerSideSessionInterface
 
 		s = settings()
 
@@ -667,6 +668,11 @@ class Server(object):
 		OctoPrintFlaskRequest.environment_wrapper = reverse_proxied
 		app.request_class = OctoPrintFlaskRequest
 		app.response_class = OctoPrintFlaskResponse
+
+		def session_persistent(app, request):
+			return "X-Preemptive-Cache" not in request.headers
+		app.session_interface = ServerSideSessionInterface(s.getBaseFolder("sessions"),
+		                                                   persistent_callback=session_persistent)
 
 		@app.before_request
 		def before_request():
@@ -850,6 +856,7 @@ class Server(object):
 						headers = kwargs.get("headers", dict())
 						headers["X-Force-View"] = plugin if plugin else "_default"
 						headers["X-Preemptive-Record"] = "no"
+						headers["X-Preemptive-Cache"] = "true"
 						kwargs["headers"] = headers
 
 						builder = EnvironBuilder(**kwargs)
