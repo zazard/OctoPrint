@@ -37,6 +37,7 @@ import octoprint.plugin
 import octoprint.util
 
 from werkzeug.contrib.cache import BaseCache
+from werkzeug.datastructures import CallbackDict
 
 from past.builtins import basestring
 
@@ -487,70 +488,72 @@ class OctoPrintFlaskResponse(flask.Response):
 
 #~~ Sessions
 
-class ServerSideSession(collections.MutableMapping, flask.sessions.SessionMixin):
+class ServerSideSession(CallbackDict, flask.sessions.SessionMixin):
 
-	def __init__(self, sid, path, serializer, persistent=True, *args, **kwargs):
+	def __init__(self, sid, path, serializer, persistent=True, new=False):
+		def on_update(self):
+			self.modified = True
+		CallbackDict.__init__(self, on_update=on_update)
+
 		self.sid = sid
 		self.path = path
 
+		self.new = new
+		self.modified = False
+
+		self._logger = logging.getLogger(__name__ + ".sessions.session")
 		self._persistent = persistent
 		self._serializer = serializer
-
 		self._lock = threading.RLock()
-		self._data = dict()
+
 		self.read()
 
-	def __getitem__(self, key):
-		with self._lock:
-			return self._data[key]
-
-	def __setitem__(self, key, value):
-		with self._lock:
-			self._data[key] = value
-			self.save()
-
-	def __delitem__(self, key):
-		with self._lock:
-			del self._data[key]
-			self.save()
-
-	def __iter__(self):
-		with self._lock:
-			return iter(self._data)
-
-	def __len__(self):
-		with self._lock:
-			return len(self._data)
+	@property
+	def persistent(self):
+		return self._persistent
 
 	def read(self):
 		with self._lock:
+			if not os.path.exists(self.path):
+				return
+
 			try:
 				with open(self.path, "rb") as f:
-					self._data = self._serializer.loads(f.read())
+					data = self._serializer.loads(f.read())
+
+				self.clear()
+				self.update(data)
+				self.modified = False
+
 				return
 			except:
-				# TODO need to properly handle access errors here... logging!
-				pass
-
-			self._data = dict()
-			self.save()
+				self._logger.exception("Could not read session file for session {}".format(self.sid))
 
 	def save(self):
-		if not self._persistent:
+		if not self.persistent:
 			return
 
 		from octoprint.util import atomic_write
 		with self._lock:
-			with atomic_write(self.path, mode="wb") as f:
-				f.write(self._serializer.dumps(self._data))
+			try:
+				with atomic_write(self.path, mode="wb") as f:
+					f.write(self._serializer.dumps(dict(self)))
+					self.modified = False
+			except:
+				self._logger.exception("Could not write session file for session {}".format(self.sid))
+
+		self._logger.debug("Saved session file for session {}".format(self.sid))
 
 	def remove(self):
 		with self._lock:
+			if not os.path.exists(self.path):
+				return
+
 			try:
 				os.remove(self.path)
+				self._logger.debug("Removed session file for session {}".format(self.sid))
 			except:
-				# TODO need to properly handle access errors here... logging!
-				pass
+				self._logger.exception("Could not remove session file for session {}".format(self.sid))
 
 
 class ServerSideSessionInterface(flask.sessions.SessionInterface):
@@ -567,7 +570,7 @@ class ServerSideSessionInterface(flask.sessions.SessionInterface):
 		self._cleanup_lock = threading.RLock()
 		self._last_cleanup = None
 
-		self._logger = logging.getLogger(__name__ + ".session")
+		self._logger = logging.getLogger(__name__ + ".sessions.interface")
 
 	def open_session(self, app, request):
 		self.cleanup_stale_sessions(app)
@@ -580,24 +583,28 @@ class ServerSideSessionInterface(flask.sessions.SessionInterface):
 		except:
 			sid = None
 
+		is_new = False
 		if not sid:
 			sid = self.generate_sid()
+			is_new = True
 			if persistent:
 				self._logger.debug("Generated a new SID {} for path {}".format(sid, request.path))
 
-		return self.session_class(sid, self.path_for_sid(sid), self.serializer, persistent=persistent)
+		return self.session_class(sid, self.path_for_sid(sid), self.serializer, persistent=persistent, new=is_new)
 
 	def save_session(self, app, session, response):
 		domain = self.get_cookie_domain(app)
 		path = self.get_cookie_path(app)
 
 		if not session:
-			self._logger.debug("Removing session with SID {}".format(session.sid))
-			session.remove()
+			if session.persistent:
+				session.remove()
 			if session.modified:
 				response.delete_cookie(app.session_cookie_name,
 				                       domain=domain, path=path)
 			return
+
+		session.save()
 
 		httponly = self.get_cookie_httponly(app)
 		secure = self.get_cookie_secure(app)
@@ -626,18 +633,15 @@ class ServerSideSessionInterface(flask.sessions.SessionInterface):
 					if entry.stat().st_mtime < cutoff:
 						to_clean.append(entry.path)
 				except:
-					if self._logger.isEnabledFor(logging.DEBUG):
-						self._logger.exception("Error while removing stale session {}".format(entry.name))
+					self._logger.exception("Error checking session file for session {} for staleness".format(entry.name))
 
 			for path in to_clean:
 				try:
 					os.remove(path)
+					self._logger.debug("Cleaned up session file for stale session {}".format(os.path.basename(path)))
 				except:
-					# TODO logging in case of an error
+					self._logger.exception("Error while removing session file for stale session {}".format(os.path.basename(path)))
 					pass
-
-			if to_clean:
-				self._logger.debug("Cleaned up {} stale sessions".format(len(to_clean)))
 
 			self._last_cleanup = time.time()
 
