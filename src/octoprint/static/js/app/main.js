@@ -7,35 +7,6 @@ $(function() {
 
         //~~ Logging setup
 
-        var logFormats = {
-            trace: "color: grey",
-            debug: "color: blue",
-            warn: "color: red",
-            error: "color: red; font-weight: bold"
-        };
-
-        var origLogFactory = log.methodFactory;
-        log.methodFactory = function(methodName, logLevel, loggerName) {
-            var rawMethod = origLogFactory(methodName, logLevel, loggerName);
-            var format = logFormats[methodName];
-            var level = _.padRight(methodName.toUpperCase(), 5, " ");
-
-            return function() {
-                var newArgs;
-                if (format && (OctoPrint.coreui.browser.chrome || OctoPrint.coreui.browser.firefox)) {
-                    newArgs = ["%c[" + level + "]", format];
-                } else {
-                    newArgs = ["[" + level + "]"];
-                }
-
-                for (var i = 0; i < arguments.length; i++) {
-                    newArgs.push(arguments[i]);
-                }
-
-                return rawMethod.apply(null, newArgs);
-            }
-        };
-
         log.setLevel(CONFIG_DEBUG ? log.levels.DEBUG : log.levels.INFO);
 
         //~~ OctoPrint client setup
@@ -552,7 +523,15 @@ $(function() {
         // reload overlay
         $("#reloadui_overlay_reload").click(function() { location.reload(); });
 
-        //~~ view model binding
+        //~~ final initialization - passive login, settings fetch, view model binding
+
+        if (!_.has(viewModelMap, "settingsViewModel")) {
+            throw new Error("settingsViewModel is missing, can't run UI");
+        }
+
+        if (!_.has(viewModelMap, "loginStateViewModel")) {
+            throw new Error("loginStateViewModel is missing, can't run UI");
+        }
 
         var bindViewModels = function() {
             log.info("Going to bind " + allViewModelData.length + " view models...");
@@ -621,7 +600,8 @@ $(function() {
                     });
                 }
 
-                viewModel._unbound = viewModel._bindings != undefined && viewModel._bindings.length == 0;
+                viewModel._unbound = viewModel._bindings !== undefined && viewModel._bindings.length === 0;
+                viewModel._bound = viewModel._bindings.length > 0;
 
                 if (viewModel.hasOwnProperty("onAfterBinding")) {
                     viewModel.onAfterBinding();
@@ -643,34 +623,55 @@ $(function() {
             log.info("Application startup complete");
         };
 
-        if (!_.has(viewModelMap, "settingsViewModel")) {
-            throw new Error("settingsViewModel is missing, can't run UI")
-        }
+        var fetchSettings = function() {
+            log.info("Finalizing application startup");
+
+            //~~ Starting up the app
+            callViewModels(allViewModels, "onStartup");
+
+            viewModelMap["settingsViewModel"].requestData()
+                .done(function() {
+                    // There appears to be an odd race condition either in JQuery's AJAX implementation or
+                    // the browser's implementation of XHR, causing a second GET request from inside the
+                    // completion handler of the very same request to never get its completion handler called
+                    // if ETag headers are present on the response (the status code of the request does NOT
+                    // seem to matter here, only that the ETag header is present).
+                    //
+                    // Minimal example with which I was able to reproduce this behaviour can be found
+                    // at https://gist.github.com/foosel/b2ddb9ebd71b0b63a749444651bfce3f
+                    //
+                    // Decoupling all consecutive calls from this done event handler hence is an easy way
+                    // to avoid this problem. A zero timeout should do the trick nicely.
+                    window.setTimeout(bindViewModels, 0);
+                });
+        };
 
         log.info("Initial application setup done, connecting to server...");
-        var dataUpdater = new DataUpdater(allViewModels);
+
+        var onServerConnect = function() {
+            // Always perform a passive login on server (re)connect. No need for
+            // onServerConnect/onServerReconnect with this in place.
+            viewModelMap["loginStateViewModel"].requestData()
+                .done(function() {
+                    // Only mark our data updater as initialized once we've done our initial
+                    // passive login request.
+                    //
+                    // This is to ensure that we have no concurrent requests overriding each other's
+                    // session during app intialization, and has the additional benefit of reducing the
+                    // number of required requests since we don't have re-request data that might have
+                    // changed if we turn out to be logged in.
+                    dataUpdater.initialized();
+                });
+        };
+
+        var dataUpdater = new DataUpdater(allViewModels, onServerConnect);
         dataUpdater.connect()
             .done(function() {
-                log.info("Finalizing application startup");
-
-                //~~ Starting up the app
-                callViewModels(allViewModels, "onStartup");
-
-                viewModelMap["settingsViewModel"].requestData()
-                    .done(function() {
-                        // There appears to be an odd race condition either in JQuery's AJAX implementation or
-                        // the browser's implementation of XHR, causing a second GET request from inside the
-                        // completion handler of the very same request to never get its completion handler called
-                        // if ETag headers are present on the response (the status code of the request does NOT
-                        // seem to matter here, only that the ETag header is present).
-                        //
-                        // Minimal example with which I was able to reproduce this behaviour can be found
-                        // at https://gist.github.com/foosel/b2ddb9ebd71b0b63a749444651bfce3f
-                        //
-                        // Decoupling all consecutive calls from this done event handler hence is an easy way
-                        // to avoid this problem. A zero timeout should do the trick nicely.
-                        window.setTimeout(bindViewModels, 0);
-                    });
+                // onServerConnect will have been called just before this.
+                //
+                // Decoupled settings fetch, for the reasons see above's lengthy description
+                // on a weird JQuery AJAX issue with ETag headers and promise handling.
+                window.setTimeout(fetchSettings, 0);
             });
     }
 );
