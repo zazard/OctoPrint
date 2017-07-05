@@ -1,12 +1,46 @@
 # coding=utf-8
 from __future__ import absolute_import, unicode_literals
 
-__author__ = "Gina Häußge <osd@foosel.net>"
+__author__ = "Gina Häußge <gina@octoprint.org>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
-__copyright__ = "Copyright (C) 2016 The OctoPrint Project - Released under terms of the AGPLv3 License"
+__copyright__ = "Copyright (C) 2017 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 
 import pkg_resources
+
+from past.builtins import basestring
+
+
+def _get_base_from_version_tuple(version_tuple):
+	"""
+	Reduces the version tuple to base version.
+
+	Example::
+		>>> _get_base_from_version_tuple(("1", "2", "5"))
+		('1', '2', '5', '*final')
+		>>> _get_base_from_version_tuple(("1", "2", "15", "*", "dev12"))
+		('1', '2', '15', '*final')
+
+	Args:
+		version_tuple (tuple): the version tuple to reduce to the base version
+
+	Returns:
+		(tuple): a version tuple reduced to base version
+
+	"""
+
+	assert len(version_tuple) > 0
+
+	base_version = []
+	for part in version_tuple:
+		if part.startswith("*"):
+			break
+		base_version.append(part)
+
+	if base_version and base_version[-1] != b'*final':
+		base_version.append(b'*final')
+
+	return tuple(base_version)
 
 
 def parse_version(version_string, base=False):
@@ -38,16 +72,14 @@ def parse_version(version_string, base=False):
 	except:
 		raise ValueError("Invalid version: {!r}".format(version_string))
 
+	# A leading v is common in github release tags and old setuptools doesn't remove it.
+	if version and isinstance(version, tuple) and version[0].lower() == "*v":
+		version = version[1:]
+
 	if base:
 		if isinstance(version, tuple):
 			# old setuptools
-			base_version = []
-			for part in version:
-				if part.startswith("*"):
-					break
-				base_version.append(part)
-			base_version.append("*final")
-			version = tuple(base_version)
+			version = _get_base_from_version_tuple(version)
 		else:
 			# new setuptools
 			version = pkg_resources.parse_version(version.base_version)
@@ -142,7 +174,7 @@ def octoprint_version_matches(spec, base=False):
 
 	    octoprint_version_matches(">=1.2.0")
 
-	    octoprint_version_matches("OctoPrint>=1.3.0", )
+	    octoprint_version_matches("OctoPrint>=1.3.0", base=True)
 
 	Arguments:
 	    spec (str or unicode): version spec to check against

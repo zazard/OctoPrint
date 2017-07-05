@@ -3,7 +3,7 @@ from __future__ import absolute_import
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
-__copyright__ = "Copyright (C) 2015 The OctoPrint Project - Released under terms of the AGPLv3 License"
+__copyright__ = "Copyright (C) 2017 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 
 import unittest
@@ -50,11 +50,13 @@ class VersionUtilTest(unittest.TestCase):
 		finally:
 			octoprint.__version__ = old_version
 
-	@ddt.data(("1.2.0",         False, "1.2.0",         ("00000001", "00000002", "00000000", "*final"),                   ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
-	          ("1.2.0-dev-123", False, "1.2.0",         ("00000001", "00000002", "00000000", "*final"),                   ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
-	          ("1.2.0-dev-123", True,  "1.2.0",         ("00000001", "00000002", "00000000", "*final"),                   ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
-	          ("1.2.0.dev.123", False, "1.2.0.dev.123", ("00000001", "00000002", "00000000", "*@", "00000123", "*final"), ("00000001", "00000002", "00000000", "*@", "00000123", "*final"), "1.2.0"),
-	          ("1.2.0.dev.123", True,  "1.2.0.dev.123", ("00000001", "00000002", "00000000", "*@", "00000123", "*final"), ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"))
+	@ddt.data(("1.2.0",          False, "1.2.0",          ("00000001", "00000002", "00000000", "*final"),                         ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
+	          ("1.2.0-dev-123",  False, "1.2.0",          ("00000001", "00000002", "00000000", "*final"),                         ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
+	          ("1.2.0-dev-123",  True,  "1.2.0",          ("00000001", "00000002", "00000000", "*final"),                         ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
+	          ("1.2.0.dev.123",  False, "1.2.0.dev.123",  ("00000001", "00000002", "00000000", "*@", "00000123", "*final"),       ("00000001", "00000002", "00000000", "*@", "00000123", "*final"), "1.2.0"),
+	          ("1.2.0.dev.123",  True,  "1.2.0.dev.123",  ("00000001", "00000002", "00000000", "*@", "00000123", "*final"),       ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"),
+	          ("v1.1.0",         False, "v1.1.0",         ("*v", "00000001", "00000001", "00000000", "*final"),                   ("00000001", "00000001", "00000000", "*final"),                   "1.1.0"),
+	          ("V1.2.0.dev.123", True,  "V1.2.0.dev.123", ("*V", "00000001", "00000002", "00000000", "*@", "00000123", "*final"), ("00000001", "00000002", "00000000", "*final"),                   "1.2.0"))
 	@ddt.unpack
 	def test_parse_version(self, version, base, stripped_version, mocked_tuple, expected_tuple, mocked_base_version):
 		mocked_obj = mock.MagicMock()
@@ -82,7 +84,7 @@ class VersionUtilTest(unittest.TestCase):
 
 			self.assertListEqual(expected_calls, mocked_parse_version.call_args_list)
 
-	def assertExpected(self, callable, args, kwargs, expected):
+	def assertExpected(self, method, args, kwargs, expected):
 		"""
 		Helper for checking the return value against an expected one.
 
@@ -92,10 +94,10 @@ class VersionUtilTest(unittest.TestCase):
 
 		if isinstance(expected, type) and issubclass(expected, Exception):
 			try:
-				callable(*args, **kwargs)
+				method(*args, **kwargs)
 				self.fail("Expected {}".format(expected))
 			except Exception as e:
 				if not isinstance(e, expected):
 					self.fail("Expected exception of type {}, got {} instead".format(expected, e.__class__.__name__))
 		else:
-			self.assertEqual(expected, callable(*args, **kwargs))
+			self.assertEqual(expected, method(*args, **kwargs))

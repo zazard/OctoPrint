@@ -5,9 +5,15 @@ $(function() {
         self.loginState = parameters[0];
         self.settings = parameters[1];
 
+        self.tabActive = false;
+
         self.log = ko.observableArray([]);
+        self.log.extend({ throttle: 500 });
+        self.plainLogLines = ko.observableArray([]);
+        self.plainLogLines.extend({ throttle: 500 });
+
         self.buffer = ko.observable(300);
-        self.upperLimit = ko.observable(3000);
+        self.upperLimit = ko.observable(1499);
 
         self.command = ko.observable(undefined);
 
@@ -27,7 +33,28 @@ $(function() {
         self.cmdHistory = [];
         self.cmdHistoryIdx = -1;
 
-        self.displayedLines = ko.computed(function() {
+        self.enableFancyFunctionality = ko.observable(true);
+        self.disableTerminalLogDuringPrinting = ko.observable(false);
+
+        self.acceptableFancyTime = 500;
+        self.acceptableUnfancyTime = 300;
+        self.reenableTimeout = 5000;
+
+        self.forceFancyFunctionality = ko.observable(false);
+        self.forceTerminalLogDuringPrinting = ko.observable(false);
+
+        self.fancyFunctionality = ko.pureComputed(function() {
+            return self.enableFancyFunctionality() || self.forceFancyFunctionality();
+        });
+        self.terminalLogDuringPrinting = ko.pureComputed(function() {
+            return !self.disableTerminalLogDuringPrinting() || self.forceTerminalLogDuringPrinting();
+        });
+
+        self.displayedLines = ko.pureComputed(function() {
+            if (!self.enableFancyFunctionality()) {
+                return self.log();
+            }
+
             var regex = self.filterRegex();
             var lineVisible = function(entry) {
                 return regex == undefined || !entry.line.match(regex);
@@ -49,7 +76,18 @@ $(function() {
             return result;
         });
 
-        self.lineCount = ko.computed(function() {
+        self.plainLogOutput = ko.pureComputed(function() {
+            if (self.fancyFunctionality()) {
+                return;
+            }
+            return self.plainLogLines().join("\n");
+        });
+
+        self.lineCount = ko.pureComputed(function() {
+            if (!self.fancyFunctionality()) {
+                return;
+            }
+
             var regex = self.filterRegex();
             var lineVisible = function(entry) {
                 return regex == undefined || !entry.line.match(regex);
@@ -86,9 +124,65 @@ $(function() {
             self.updateFilterRegex();
         });
 
+        self._reenableFancyTimer = undefined;
+        self._reenableUnfancyTimer = undefined;
+        self._disableFancy = function(difference) {
+            log.warn("Terminal: Detected slow client (needed " + difference + "ms for processing new log data), disabling fancy terminal functionality");
+            if (self._reenableFancyTimer) {
+                window.clearTimeout(self._reenableFancyTimer);
+                self._reenableFancyTimer = undefined;
+            }
+            self.enableFancyFunctionality(false);
+        };
+        self._reenableFancy = function(difference) {
+            if (self._reenableFancyTimer) return;
+            self._reenableFancyTimer = window.setTimeout(function() {
+                log.info("Terminal: Client speed recovered, enabling fancy terminal functionality");
+                self.enableFancyFunctionality(true);
+            }, self.reenableTimeout);
+        };
+        self._disableUnfancy = function(difference) {
+            log.warn("Terminal: Detected very slow client (needed " + difference + "ms for processing new log data), completely disabling terminal output during printing");
+            if (self._reenableUnfancyTimer) {
+                window.clearTimeout(self._reenableUnfancyTimer);
+                self._reenableUnfancyTimer = undefined;
+            }
+            self.disableTerminalLogDuringPrinting(true);
+        };
+        self._reenableUnfancy = function() {
+            if (self._reenableUnfancyTimer) return;
+            self._reenableUnfancyTimer = window.setTimeout(function() {
+                log.info("Terminal: Client speed recovered, enabling terminal output during printing");
+                self.disableTerminalLogDuringPrinting(false);
+            }, self.reenableTimeout);
+        };
+
         self.fromCurrentData = function(data) {
             self._processStateData(data.state);
+
+            var start = new Date().getTime();
             self._processCurrentLogData(data.logs);
+            var end = new Date().getTime();
+            var difference = end - start;
+
+            if (self.enableFancyFunctionality()) {
+                // fancy enabled -> check if we need to disable fancy
+                if (difference >= self.acceptableFancyTime) {
+                    self._disableFancy(difference);
+                }
+            } else if (!self.disableTerminalLogDuringPrinting()) {
+                // fancy disabled, unfancy not -> check if we need to disable unfancy or re-enable fancy
+                if (difference >= self.acceptableUnfancyTime) {
+                    self._disableUnfancy(difference);
+                } else if (difference < self.acceptableFancyTime / 2.0) {
+                    self._reenableFancy(difference);
+                }
+            } else {
+                // fancy & unfancy disabled -> check if we need to re-enable unfancy
+                if (difference < self.acceptableUnfancyTime / 2.0) {
+                    self._reenableUnfancy(difference);
+                }
+            }
         };
 
         self.fromHistoryData = function(data) {
@@ -99,27 +193,48 @@ $(function() {
         self._processCurrentLogData = function(data) {
             var length = self.log().length;
             if (length >= self.upperLimit()) {
-                var cutoff = "--- too many lines to buffer, cut off ---";
-                var last = self.log()[length-1];
-                if (!last || last.type != "cut" || last.line != cutoff) {
-                    self.log(self.log().concat(self._toInternalFormat(cutoff, "cut")));
+                return;
+            }
+
+            if (!self.terminalLogDuringPrinting() && self.isPrinting()) {
+                var last = self.plainLogLines()[self.plainLogLines().length - 1];
+                var disabled = "--- client too slow, log output disabled while printing ---";
+                if (last != disabled) {
+                    self.plainLogLines.push(disabled);
                 }
                 return;
             }
 
-            var newLog = self.log().concat(_.map(data, function(line) { return self._toInternalFormat(line) }));
+            var newData = (data.length + length > self.upperLimit())
+                ? data.slice(0, self.upperLimit() - length)
+                : data;
+            if (!newData) {
+                return;
+            }
+
+            if (!self.fancyFunctionality()) {
+                // lite version of the terminal - text output only
+                self.plainLogLines(self.plainLogLines().concat(newData).slice(-self.buffer()));
+                self.updateOutput();
+                return;
+            }
+
+            var newLog = self.log().concat(_.map(newData, function(line) { return self._toInternalFormat(line) }));
+            if (newData.length != data.length) {
+                var cutoff = "--- too many lines to buffer, cut off ---";
+                newLog.push(self._toInternalFormat(cutoff, "cut"));
+            }
+
             if (self.autoscrollEnabled()) {
                 // we only keep the last <buffer> entries
                 newLog = newLog.slice(-self.buffer());
-            } else if (newLog.length > self.upperLimit()) {
-                // we only keep the first <upperLimit> entries
-                newLog = newLog.slice(0, self.upperLimit());
             }
             self.log(newLog);
             self.updateOutput();
         };
 
         self._processHistoryLogData = function(data) {
+            self.plainLogLines(data);
             self.log(_.map(data, function(line) { return self._toInternalFormat(line) }));
             self.updateOutput();
         };
@@ -128,7 +243,7 @@ $(function() {
             if (type == undefined) {
                 type = "line";
             }
-            return {line: line, type: type}
+            return {line: escapeUnprintableCharacters(line), type: type}
         };
 
         self._processStateData = function(data) {
@@ -152,7 +267,7 @@ $(function() {
         };
 
         self.updateOutput = function() {
-            if (self.autoscrollEnabled()) {
+            if (self.tabActive && OctoPrint.coreui.browserTabVisible && self.autoscrollEnabled()) {
                 self.scrollToEnd();
             }
         };
@@ -162,14 +277,14 @@ $(function() {
         };
 
         self.selectAll = function() {
-            var container = $("#terminal-output");
+            var container = self.fancyFunctionality() ? $("#terminal-output") : $("#terminal-output-lowfi");
             if (container.length) {
                 container.selectText();
             }
         };
 
         self.scrollToEnd = function() {
-            var container = $("#terminal-output");
+            var container = self.fancyFunctionality() ? $("#terminal-output") : $("#terminal-output-lowfi");
             if (container.length) {
                 container.scrollTop(container[0].scrollHeight);
             }
@@ -188,29 +303,18 @@ $(function() {
             }
 
             if (command) {
-                $.ajax({
-                    url: API_BASEURL + "printer/command",
-                    type: "POST",
-                    dataType: "json",
-                    contentType: "application/json; charset=UTF-8",
-                    data: JSON.stringify({"command": command})
-                });
-
-                self.cmdHistory.push(command);
-                self.cmdHistory.slice(-300); // just to set a sane limit to how many manually entered commands will be saved...
-                self.cmdHistoryIdx = self.cmdHistory.length;
-                self.command("");
+                OctoPrint.control.sendGcode(command)
+                    .done(function() {
+                        self.cmdHistory.push(command);
+                        self.cmdHistory.slice(-300); // just to set a sane limit to how many manually entered commands will be saved...
+                        self.cmdHistoryIdx = self.cmdHistory.length;
+                        self.command("");
+                    });
             }
         };
 
         self.fakeAck = function() {
-            $.ajax({
-                url: API_BASEURL + "connection",
-                type: "POST",
-                dataType: "json",
-                contentType: "application/json; charset=UTF-8",
-                data: JSON.stringify({"command": "fake_ack"})
-            });
+            OctoPrint.connection.fakeAck();
         };
 
         self.handleKeyDown = function(event) {
@@ -247,12 +351,8 @@ $(function() {
         };
 
         self.onAfterTabChange = function(current, previous) {
-            if (current != "#term") {
-                return;
-            }
-            if (self.autoscrollEnabled()) {
-                self.scrollToEnd();
-            }
+            self.tabActive = current == "#term";
+            self.updateOutput();
         };
 
     }
