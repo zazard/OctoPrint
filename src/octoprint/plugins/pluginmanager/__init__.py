@@ -860,10 +860,14 @@ class PluginManagerPlugin(octoprint.plugin.SimpleApiPlugin,
 		else:
 			return "unmapped"
 
-	@classmethod
-	def _get_octoprint_version(cls, base=False):
+	@staticmethod
+	def _get_octoprint_version_string():
 		from octoprint import __version__ as octoprint_version
-		return parse_version(octoprint_version, base=base)
+		return octoprint_version
+
+	@staticmethod
+	def _get_octoprint_version(base=False):
+		return parse_version(PluginManagerPlugin._get_octoprint_version_string(), base=base)
 
 	@property
 	def _reconnect_hooks(self):
