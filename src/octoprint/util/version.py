@@ -16,9 +16,9 @@ def _get_base_from_version_tuple(version_tuple):
 	Reduces the version tuple to base version.
 
 	Example::
-		>>> _get_base_from_version_tuple(("1", "2", "5"))
+		>>> _get_base_from_version_tuple((b"1", b"2", b"5"))
 		('1', '2', '5', '*final')
-		>>> _get_base_from_version_tuple(("1", "2", "15", "*", "dev12"))
+		>>> _get_base_from_version_tuple((b"1", b"2", b"15", b"*", b"dev12"))
 		('1', '2', '15', '*final')
 
 	Args:
