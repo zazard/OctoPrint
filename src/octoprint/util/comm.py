@@ -385,8 +385,6 @@ class MachineCom(object):
 		self.last_position = PositionRecord()
 		self.pause_position = PositionRecord()
 		self._record_pause_position = False
-		self.cancel_position = PositionRecord()
-		self._record_cancel_position = False
 
 		# print job
 		self._currentFile = None
@@ -692,8 +690,6 @@ class MachineCom(object):
 
 		if scriptName == "afterPrintPaused" or scriptName == "beforePrintResumed":
 			context.update(dict(pause_position=self.pause_position))
-		elif scriptName == "afterPrintCancelled":
-			context.update(dict(cancel_position=self.cancel_position))
 
 		template = settings().loadScript("gcode", scriptName, context=context)
 		if template is None:
@@ -834,10 +830,6 @@ class MachineCom(object):
 		self._currentFile = None
 		self._callback.on_comm_file_selected(None, None, False)
 
-	def _cancel_preparation_done(self):
-		self._recordFilePosition()
-		self._callback.on_comm_print_job_cancelled()
-
 	def cancelPrint(self, firmware_error=None):
 		if not self.isOperational() or self.isStreaming():
 			return
@@ -845,13 +837,6 @@ class MachineCom(object):
 		if not self.isBusy() or self._currentFile is None:
 			# we aren't even printing, nothing to cancel...
 			return
-
-		def _on_M400_sent():
-			# we don't call on_print_job_cancelled on our callback here
-			# because we do this only after our M114 has been answered
-			# by the firmware
-			self._record_cancel_position = True
-			self.sendCommand("M114")
 
 		with self._jobLock:
 			self._changeState(self.STATE_OPERATIONAL)
@@ -866,7 +851,8 @@ class MachineCom(object):
 					except:
 						pass
 
-			self.sendCommand("M400", on_sent=_on_M400_sent)
+			self._recordFilePosition()
+			self._callback.on_comm_print_job_cancelled()
 
 	def _pause_preparation_done(self):
 		self._callback.on_comm_print_job_paused()
@@ -1196,12 +1182,6 @@ class MachineCom(object):
 							self._record_pause_position = False
 							self.pause_position.copy_from(self.last_position)
 							self._pause_preparation_done()
-
-						if self._record_cancel_position:
-							reason = "cancel"
-							self._record_cancel_position = False
-							self.cancel_position.copy_from(self.last_position)
-							self._cancel_preparation_done()
 
 						self._callback.on_comm_position_update(self.last_position.as_dict(), reason=reason)
 

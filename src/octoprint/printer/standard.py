@@ -1105,7 +1105,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		self._setCurrentZ(None)
 		self._updateProgressData()
 
-		payload = self._payload_for_print_job_event(position=self._comm.cancel_position.as_dict() if self._comm and self._comm.cancel_position else None)
+		payload = self._payload_for_print_job_event(position=None)
 		if payload:
 			payload["time"] = self._comm.getPrintTime()
 
