@@ -16,6 +16,9 @@ prerelease
 HEAD
 \(detached.*
 
+# and test branches shall be tags + post
+test/.* pep440-post
+
 # maintenance is currently the branch for preparation of maintenance release 1.3.3
 # so are any fix/... and improve/... branches
 maintenance 1.3.3 0a69dbeddb301d5a32827a3f0d561f875df24234 pep440-dev
