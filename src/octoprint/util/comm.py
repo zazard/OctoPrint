@@ -5,6 +5,7 @@ __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agp
 __copyright__ = "Copyright (C) 2013 David Braam - Released under terms of the AGPLv3 License"
 
 
+import datetime
 import os
 import glob
 import time
@@ -340,10 +341,11 @@ class MachineCom(object):
 	STATE_PAUSING = 13
 	STATE_RESUMING = 14
 	STATE_FINISHING = 15
+        STATE_WAITING_FOR_CONFIRMATION = 16
 
 	# be sure to add anything here that signifies an operational state
 	OPERATIONAL_STATES = (STATE_PRINTING, STATE_OPERATIONAL, STATE_PAUSED, STATE_CANCELLING, STATE_PAUSING,
-	                      STATE_RESUMING, STATE_FINISHING, STATE_TRANSFERING_FILE)
+	                      STATE_RESUMING, STATE_FINISHING, STATE_TRANSFERING_FILE, STATE_WAITING_FOR_CONFIRMATION)
 
 	# be sure to add anything here that signifies a printing state
 	PRINTING_STATES = (STATE_PRINTING, STATE_CANCELLING, STATE_PAUSING, STATE_RESUMING, STATE_FINISHING)
@@ -668,6 +670,8 @@ class MachineCom(object):
 			return "Offline (Error: {})".format(self.getErrorString())
 		elif state == self.STATE_TRANSFERING_FILE:
 			return "Transferring file to SD"
+                elif state == self.STATE_WAITING_FOR_CONFIRMATION:
+                        return "Waiting for print confirmation"
 		return "Unknown State ({})".format(self._state)
 
 	def getErrorString(self):
@@ -1008,6 +1012,31 @@ class MachineCom(object):
 
 		try:
 			with self._jobLock:
+                                oldState = self._state
+                                self._changeState(self.STATE_WAITING_FOR_CONFIRMATION)
+
+                                delay = 20  # seconds
+                                buttonfile = "/tmp/buttonpress"
+                                self._logger.info("Waiting up to {} seconds for button-press file mtime to be updated".format(delay))
+                                pressed = False
+                                for tries in range(0, delay):
+                                    try:
+                                        st = os.stat(buttonfile)
+                                        age_sec = (datetime.datetime.now() - datetime.datetime.fromtimestamp(st.st_mtime)).seconds
+                                        if age_sec < 5:
+                                            pressed = True
+                                            break
+                                    except:
+                                        pass
+                                    time.sleep(1)
+
+                                if not pressed:
+                                    self._logger.error("Confirmation button not pressed, aborting !")
+                                    self._changeState(oldState)
+                                    return
+
+                                self._logger.info("Confirmation button pressed, let's go")
+
 				self._currentFile.start()
 
 				self._changeState(self.STATE_PRINTING)
